@@ -345,7 +345,12 @@ public partial class WebViewWindow : Window
                     lastBroadcast = DateTime.UtcNow;
                 }
 
-                await Task.Delay(16); // ~60fps
+                // 4. Update dynamic tick rate based on activity
+                bool isPlaying = snapshot?.IsPlaying ?? false;
+                bool isResults = snapshot?.StateNumber == 7;
+                int tickDelay = (isPlaying || isResults) ? 16 : 66; // 60Hz during action, 15Hz idle
+
+                await Task.Delay(tickDelay); // Dynamic frequency
             }
             catch (Exception ex)
             {

@@ -84,6 +84,11 @@ namespace OsuGrind.LiveReading
         private DateTime _lastConnectionAttempt = DateTime.MinValue;
         private CachedBeatmapStats? _cachedStats;
         private DateTime _lastTimeChange = DateTime.Now;
+        private DateTime _lastScreenScan = DateTime.MinValue;
+        private IntPtr _cachedCurrentScreen = IntPtr.Zero;
+        private DateTime _lastModScan = DateTime.MinValue;
+        private DateTime _lastBeatmapInfoScan = DateTime.MinValue;
+        private RawBeatmapInfo? _cachedRawBeatmapInfo;
 
         private LazerScoreDetector? _detector;
         private IntPtr _lastResultScoreInfoPtr = IntPtr.Zero;
@@ -1020,17 +1025,35 @@ namespace OsuGrind.LiveReading
                     if (_gameBaseAddress == IntPtr.Zero) return snapshot;
                 }
 
-                IntPtr currentScreen = GetCurrentScreen();
+                // 1. Read Basic State (Screens) - Throttle screen stack scanning unless playing
+                IntPtr currentScreen = _cachedCurrentScreen;
+                if (DateTime.Now - _lastScreenScan > TimeSpan.FromMilliseconds(250) || _cachedCurrentScreen == IntPtr.Zero)
+                {
+                    currentScreen = GetCurrentScreen();
+                    _cachedCurrentScreen = currentScreen;
+                    _lastScreenScan = DateTime.Now;
+                }
+
                 if (currentScreen == IntPtr.Zero)
                 {
-                    WriteLog("GetStats: No current screen");
+                    WriteLogThrottled("no-screen", "GetStats: No current screen");
                     snapshot.StateNumber = 0; // Connected but can't find screen (Menu?)
                     // Even if we can't find the screen, we might be able to read the beatmap
                     ReadBeatmap(snapshot);
                     
-                    var mods = ReadModsFromMemory();
-                    snapshot.ModsList = mods;
-                    snapshot.Mods = (mods != null && mods.Count > 0) ? string.Join(",", mods) : "NM";
+                    // Throttle idle mod reads
+                    if (DateTime.Now - _lastModScan > TimeSpan.FromMilliseconds(500))
+                    {
+                        var mods = ReadModsFromMemory();
+                        snapshot.ModsList = mods;
+                        snapshot.Mods = (mods != null && mods.Count > 0) ? string.Join(",", mods) : "NM";
+                        _lastModScan = DateTime.Now;
+                    }
+                    else
+                    {
+                        snapshot.ModsList = _currentModsList;
+                        snapshot.Mods = (_currentModsList != null && _currentModsList.Count > 0) ? string.Join(",", _currentModsList) : "NM";
+                    }
 
                     snapshot.Stars = _staticStars;
                     snapshot.BPM = (int?)Math.Round(_staticBpm);
@@ -1049,11 +1072,15 @@ namespace OsuGrind.LiveReading
                 // DebugService.Log($"GetStats: ReadBeatmap returned {beatmapInfoPtr:X}");
                 UpdateBeatmapFile(beatmapInfoPtr); // Update _currentOsuFilePath for PP calculation
 
-                IntPtr playerScreen = IntPtr.Zero;
-                IntPtr songSelectScreen = IntPtr.Zero;
-                IntPtr resultScreen = IntPtr.Zero;
-                IntPtr editorScreen = IntPtr.Zero;
-                IntPtr multiplayerScreen = IntPtr.Zero;
+                IntPtr playerScreen = CheckIfPlayer(currentScreen) ? currentScreen : IntPtr.Zero;
+                IntPtr resultScreen = (playerScreen == IntPtr.Zero && CheckIfResultScreen(currentScreen)) ? currentScreen : IntPtr.Zero;
+                
+                // If we are playing, boost screen scan rate next frame
+                if (playerScreen != IntPtr.Zero || resultScreen != IntPtr.Zero) _lastScreenScan = DateTime.MinValue; 
+
+                IntPtr songSelectScreen = (playerScreen == IntPtr.Zero && resultScreen == IntPtr.Zero && CheckIfSongSelect(currentScreen)) ? currentScreen : IntPtr.Zero;
+                IntPtr editorScreen = (playerScreen == IntPtr.Zero && resultScreen == IntPtr.Zero && songSelectScreen == IntPtr.Zero && CheckIfEditorScreen(currentScreen)) ? currentScreen : IntPtr.Zero;
+                IntPtr multiplayerScreen = (playerScreen == IntPtr.Zero && resultScreen == IntPtr.Zero && songSelectScreen == IntPtr.Zero && editorScreen == IntPtr.Zero && CheckIfMultiplayerScreen(currentScreen)) ? currentScreen : IntPtr.Zero;
 
                     // Refactored Logic: Prioritize Playing > Results > SongSelect > Menu
                     
@@ -1191,7 +1218,14 @@ namespace OsuGrind.LiveReading
                         snapshot.Mods = mods.Count > 0 ? string.Join(",", mods) : "NM";
 
                         // 4. Update RosuService context using Raw Beatmap Info
-                        var rawBeatmapInfo = ReadRawBeatmapInfoCached();
+                        RawBeatmapInfo? rawBeatmapInfo = _cachedRawBeatmapInfo;
+                        if (DateTime.Now - _lastBeatmapInfoScan > TimeSpan.FromMilliseconds(200) || _cachedRawBeatmapInfo == null)
+                        {
+                            rawBeatmapInfo = ReadRawBeatmapInfoCached();
+                            _cachedRawBeatmapInfo = rawBeatmapInfo;
+                            _lastBeatmapInfoScan = DateTime.Now;
+                        }
+
                         if (rawBeatmapInfo != null && !string.IsNullOrEmpty(rawBeatmapInfo.MD5Hash))
                         {
                             // Beatmap metadata and attributes are already read by ReadBeatmap(snapshot) early in GetStats
@@ -2696,7 +2730,6 @@ namespace OsuGrind.LiveReading
 
         private List<string> _cachedMods = new();
         private IntPtr _lastModsValuePtr = IntPtr.Zero;
-        private RawBeatmapInfo? _cachedRawBeatmapInfo;
         private IntPtr _lastBeatmapInfoPtr = IntPtr.Zero;
 
 

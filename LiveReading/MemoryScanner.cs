@@ -36,6 +36,8 @@ namespace OsuGrind.LiveReading
             }
         }
 
+        private byte[] _scanBuffer = new byte[4 * 1024 * 1024];
+
         public IntPtr Scan(string pattern, bool nonZeroMask = false, bool imageOnly = false, bool executableOnly = false, bool privateOnly = false)
         {
             if (_processHandle == IntPtr.Zero) return IntPtr.Zero;
@@ -45,7 +47,6 @@ namespace OsuGrind.LiveReading
             long address = 0;
             Win32.MEMORY_BASIC_INFORMATION mbi;
             uint mbiSize = (uint)Marshal.SizeOf(typeof(Win32.MEMORY_BASIC_INFORMATION));
-            byte[] buffer = new byte[4 * 1024 * 1024];
 
             try
             {
@@ -58,10 +59,10 @@ namespace OsuGrind.LiveReading
                         long regionOffset = 0;
                         while (regionOffset < (long)mbi.RegionSize)
                         {
-                            long bytesToRead = Math.Min(buffer.Length, (long)mbi.RegionSize - regionOffset);
-                            if (Win32.ReadProcessMemory(_processHandle, IntPtr.Add(mbi.BaseAddress, (int)regionOffset), buffer, (int)bytesToRead, out IntPtr read))
+                            long bytesToRead = Math.Min(_scanBuffer.Length, (long)mbi.RegionSize - regionOffset);
+                            if (Win32.ReadProcessMemory(_processHandle, IntPtr.Add(mbi.BaseAddress, (int)regionOffset), _scanBuffer, (int)bytesToRead, out IntPtr read))
                             {
-                                int match = IndexOfPattern(buffer, (int)read, patternBytes, nonZeroMask);
+                                int match = IndexOfPattern(_scanBuffer, (int)read, patternBytes, nonZeroMask);
                                 if (match != -1) return IntPtr.Add(mbi.BaseAddress, (int)regionOffset + match);
                                 regionOffset += Math.Max(1, (int)read - patternBytes.Length);
                             }

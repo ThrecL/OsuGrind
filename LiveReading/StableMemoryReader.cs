@@ -279,9 +279,7 @@ namespace OsuGrind.LiveReading
                                     snapshot.HitCounts = new HitCounts(r300, r100, r50, rMiss);
                                     snapshot.MaxCombo = _scanner.ReadUInt16(IntPtr.Add(resBase, 0x68));
                                     
-                                    uint score1 = _scanner.ReadXorInt32(IntPtr.Add(resBase, 0x78));
-                                    uint score2 = _scanner.ReadXorInt32(IntPtr.Add(resBase, 0x48));
-                                    snapshot.Score = (score1 > 0 && score1 < 2147483647) ? (long)score1 : (long)score2;
+                                    snapshot.Score = _scanner.ReadInt32(IntPtr.Add(resBase, 0x78));
 
 
                                     snapshot.Combo = snapshot.MaxCombo;
@@ -309,9 +307,7 @@ namespace OsuGrind.LiveReading
                                         int passedObjects = h300 + h100 + h50 + miss;
                                         snapshot.Combo = passedObjects > 0 ? combo : 0;
                                         
-                                        uint gScore1 = _scanner.ReadXorInt32(IntPtr.Add(scoreBase, 120));
-                                        uint gScore2 = _scanner.ReadXorInt32(IntPtr.Add(scoreBase, 72)); // 0x48
-                                        snapshot.Score = (gScore1 > 0 && gScore1 < 2147483647) ? (long)gScore1 : (long)gScore2;
+                                        snapshot.Score = _scanner.ReadInt32(IntPtr.Add(rulesetAddr, 0x100));
                                         
 
                                         int currentCombo = snapshot.Combo ?? 0;
