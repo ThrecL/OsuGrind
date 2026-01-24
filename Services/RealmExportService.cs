@@ -250,7 +250,7 @@ namespace OsuGrind.Services
 
                     if ((artist == "Unknown" || title == "Unknown") && metadata != null)
                     {
-                        try { artist = metadata.Title?.Split(" - ").FirstOrDefault() ?? artist; } catch { }
+                        try { artist = metadata?.Title?.Split(" - ").FirstOrDefault() ?? artist; } catch { }
                     }
 
                     var folderName = $"{artist} - {title} ({beatmapHash.Substring(0, 8)})";

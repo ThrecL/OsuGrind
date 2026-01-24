@@ -43,6 +43,43 @@ namespace OsuGrind.LiveReading
         public RosuService _rosuService;
         // PP+ REMOVED\n        // public PlusDifficultyService _plusService = new PlusDifficultyService();
         private Dictionary<IntPtr, string> _modVTableMap = new();
+        private int _lastGamemode = -1;
+
+        private static readonly Dictionary<int, Dictionary<string, string[]>> ModsCategories = new()
+        {
+            [0] = new() { // osu
+                ["Reduction"] = new[] { "EZ", "NF", "HT", "DC" },
+                ["Increase"] = new[] { "HR", "SD", "PF", "DT", "NC", "HD", "FL", "BL", "ST", "AC" },
+                ["Automation"] = new[] { "AT", "CN", "RX", "AP", "SO" },
+                ["Conversion"] = new[] { "TP", "DA", "CL", "RD", "MR", "AL", "SG" },
+                ["Fun"] = new[] { "TR", "WG", "SI", "GR", "DF", "WU", "WD", "TC", "BR", "AD", "MU", "NS", "MG", "RP", "AS", "FR", "BU", "SY", "DP", "BM" },
+                ["System"] = new[] { "TD", "SV2" }
+            },
+            [1] = new() { // taiko
+                ["Reduction"] = new[] { "EZ", "NF", "HT", "DC", "SR" },
+                ["Increase"] = new[] { "HR", "SD", "PF", "DT", "NC", "HD", "FL", "AC" },
+                ["Automation"] = new[] { "AT", "CN", "RX" },
+                ["Conversion"] = new[] { "RD", "DA", "CL", "SW", "SG", "CS" },
+                ["Fun"] = new[] { "WU", "WD", "MU", "AS" },
+                ["System"] = new[] { "TD", "SV2" }
+            },
+            [2] = new() { // catch
+                ["Reduction"] = new[] { "EZ", "NF", "HT", "DC" },
+                ["Increase"] = new[] { "HR", "SD", "PF", "DT", "NC", "HD", "FL", "AC" },
+                ["Automation"] = new[] { "AT", "CN", "RX" },
+                ["Conversion"] = new[] { "DA", "CL", "MR" },
+                ["Fun"] = new[] { "WU", "WD", "FF", "MU", "NS", "MF" },
+                ["System"] = new[] { "TD", "SV2" }
+            },
+            [3] = new() { // mania
+                ["Reduction"] = new[] { "EZ", "NF", "HT", "DC", "NR" },
+                ["Increase"] = new[] { "HR", "SD", "PF", "DT", "NC", "FI", "HD", "CO", "FL", "AC" },
+                ["Automation"] = new[] { "AT", "CN" },
+                ["Conversion"] = new[] { "RD", "DS", "MR", "DA", "CL", "IN", "CS", "HO", "1K", "2K", "3K", "4K", "5K", "6K", "7K", "8K", "9K", "10K" },
+                ["Fun"] = new[] { "WU", "WD", "MU", "AS" },
+                ["System"] = new[] { "TD", "SV2" }
+            }
+        };
         private string? _lastResolvedMd5;
         private DateTime _lastConnectionAttempt = DateTime.MinValue;
         private CachedBeatmapStats? _cachedStats;
@@ -190,40 +227,135 @@ namespace OsuGrind.LiveReading
             }
         }
 
+        private int ReadGamemode()
+        {
+            if (_gameBaseAddress == IntPtr.Zero) return 0;
+            try
+            {
+                IntPtr rulesetBindable = _scanner.ReadIntPtr(IntPtr.Add(_gameBaseAddress, Offsets.OsuGameDesktop.Ruleset));
+                if (rulesetBindable == IntPtr.Zero) return 0;
+                IntPtr rulesetInfo = _scanner.ReadIntPtr(IntPtr.Add(rulesetBindable, 0x20)); // Bindable<RulesetInfo>.Value
+                if (rulesetInfo == IntPtr.Zero) return 0;
+
+                int gamemode = _scanner.ReadInt32(IntPtr.Add(rulesetInfo, Offsets.RulesetInfo.OnlineID));
+                WriteLog($"ReadGamemode: {gamemode}");
+                return (gamemode >= 0 && gamemode <= 3) ? gamemode : 0;
+            }
+            catch { return 0; }
+        }
+
         private void BuildModVTableMap()
         {
+            int gamemode = ReadGamemode();
+            BuildModVTableMap(gamemode);
+        }
+
+        private static readonly HashSet<string> KnownAcronyms = new() { 
+            "EZ", "NF", "HT", "DC", "HR", "SD", "PF", "DT", "NC", "HD", "FL", "BL", "ST", "AC",
+            "TP", "DA", "CL", "RD", "MR", "AL", "SG", "AT", "CN", "RX", "AP", "SO",
+            "TR", "WG", "SI", "GR", "DF", "WU", "WD", "TC", "BR", "AD", "MU", "NS", "MG", "RP",
+            "AS", "FR", "BU", "SY", "DP", "BM", "TD", "SV2", "1K", "2K", "3K", "4K", "5K", "6K", "7K", "8K", "9K", "10K"
+        };
+
+        private string? TryReadAcronymDirectly(IntPtr modPtr)
+        {
+            if (modPtr == IntPtr.Zero) return null;
+            // Scan the object for a string pointer.
+            // Acronym is usually one of the first fields or returned by a property.
+            // If it's a field, it will be a pointer to a string object.
+            for (int offset = 0; offset <= 0x60; offset += 8)
+            {
+                try
+                {
+                    IntPtr potPtr = _scanner.ReadIntPtr(IntPtr.Add(modPtr, offset));
+                    if (potPtr == IntPtr.Zero) continue;
+                    
+                    string s = _scanner.ReadString(potPtr);
+                    if (!string.IsNullOrEmpty(s) && s.Length >= 2 && s.Length <= 4 && KnownAcronyms.Contains(s.ToUpper()))
+                    {
+                        return s.ToUpper();
+                    }
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        private void BuildModVTableMap(int gamemode)
+        {
             if (_gameBaseAddress == IntPtr.Zero) return;
-            DebugLog("BuildModVTableMap STARTED.");
+            DebugLog($"BuildModVTableMap STARTED for gamemode {gamemode}.");
+            _modVTableMap.Clear();
+            _lastGamemode = gamemode;
+
             try
             {
                 IntPtr availableModsBindable = _scanner.ReadIntPtr(IntPtr.Add(_gameBaseAddress, Offsets.OsuGameDesktop.AvailableMods));
                 if (availableModsBindable == IntPtr.Zero) return;
 
-                // Try both common Bindable offsets
-                IntPtr availableModsDict = _scanner.ReadIntPtr(IntPtr.Add(availableModsBindable, 0x20));
-                if (availableModsDict == IntPtr.Zero)
-                    availableModsDict = _scanner.ReadIntPtr(IntPtr.Add(availableModsBindable, 0x10));
+                // Bindable<T> Value is usually at 0x10, 0x18, 0x20, or 0x28
+                IntPtr availableModsDict = IntPtr.Zero;
+                int[] dictOffsets = { 0x20, 0x10, 0x18, 0x28, 0x30 };
+                foreach (var off in dictOffsets)
+                {
+                    IntPtr pot = _scanner.ReadIntPtr(IntPtr.Add(availableModsBindable, off));
+                    if (pot != IntPtr.Zero)
+                    {
+                        // Basic check for Dictionary: has _entries at 0x10 or 0x18?
+                        IntPtr entries = _scanner.ReadIntPtr(IntPtr.Add(pot, 0x10));
+                        if (entries != IntPtr.Zero) { availableModsDict = pot; break; }
+                    }
+                }
                 
                 if (availableModsDict == IntPtr.Zero) return;
 
                 IntPtr entriesArray = _scanner.ReadIntPtr(IntPtr.Add(availableModsDict, 0x10));
                 int count = _scanner.ReadInt32(IntPtr.Add(availableModsDict, 0x38)); // _count
                 
+                WriteLog($"BuildModVTableMap: dict={availableModsDict:X}, entries={entriesArray:X}, count={count}");
+                
                 if (entriesArray == IntPtr.Zero || count <= 0 || count > 150) return;
+
+                string[] categoryNames = { "Reduction", "Increase", "Conversion", "Automation", "Fun", "System" };
 
                 for (int i = 0; i < count; i++)
                 {
                     IntPtr entryPtr = IntPtr.Add(entriesArray, 0x10 + i * 0x18);
-                    IntPtr modsListPtr = _scanner.ReadIntPtr(entryPtr);
-                    int modType = _scanner.ReadInt32(IntPtr.Add(entryPtr, 0x8));
+                    
+                    // .NET Dictionary Entry: hash, next, key, value
+                    // Try to find the Key (0-5) and Value (Pointer)
+                    IntPtr modsListPtr = IntPtr.Zero;
+                    int modType = -1;
+
+                    // Scan the entry (24 bytes) for a valid ModType and List pointer
+                    for (int off = 0; off <= 16; off += 8)
+                    {
+                        int potType = _scanner.ReadInt32(IntPtr.Add(entryPtr, off));
+                        if (potType >= 0 && potType < categoryNames.Length)
+                        {
+                            // If this is the key, the value is likely at off+8 or off-8
+                            IntPtr v1 = (off + 8 <= 16) ? _scanner.ReadIntPtr(IntPtr.Add(entryPtr, off + 8)) : IntPtr.Zero;
+                            IntPtr v2 = (off - 8 >= 0) ? _scanner.ReadIntPtr(IntPtr.Add(entryPtr, off - 8)) : IntPtr.Zero;
+                            
+                            if (v1 != IntPtr.Zero && v1.ToInt64() > 0x10000) { modsListPtr = v1; modType = potType; break; }
+                            if (v2 != IntPtr.Zero && v2.ToInt64() > 0x10000) { modsListPtr = v2; modType = potType; break; }
+                        }
+                    }
 
                     if (modsListPtr == IntPtr.Zero) continue;
 
+                    string categoryName = categoryNames[modType];
+                    if (!ModsCategories.ContainsKey(gamemode) || !ModsCategories[gamemode].ContainsKey(categoryName)) continue;
+
+                    string[] expectedAcronyms = ModsCategories[gamemode][categoryName];
+
+                    // List<T> layout: _items (0x8), _size (0x10)
                     int listSize = _scanner.ReadInt32(IntPtr.Add(modsListPtr, 0x10));
                     IntPtr itemsArray = _scanner.ReadIntPtr(IntPtr.Add(modsListPtr, 0x8));
 
-                    if (itemsArray == IntPtr.Zero || listSize <= 0 || listSize > 200) continue;
+                    if (itemsArray == IntPtr.Zero || listSize <= 0) continue;
 
+                    List<IntPtr> flattenedModPtrs = new();
                     for (int j = 0; j < listSize; j++)
                     {
                         IntPtr modPtr = _scanner.ReadIntPtr(IntPtr.Add(itemsArray, 0x10 + j * 8));
@@ -232,35 +364,74 @@ namespace OsuGrind.LiveReading
                         IntPtr vtable = _scanner.ReadIntPtr(modPtr);
                         if (vtable == IntPtr.Zero) continue;
 
+                        // Identify MultiMod (using signature OR direct acronym read)
+                        string? directAcr = TryReadAcronymDirectly(modPtr);
+                        bool isMultiMod = (directAcr == null); // If no acronym found, check if it's MultiMod
+                        
+                        if (isMultiMod)
+                        {
+                            // Check MultiMod signature as backup
+                            int s1 = _scanner.ReadInt32(vtable);
+                            int s2 = _scanner.ReadInt32(IntPtr.Add(vtable, 3));
+                            if (s1 != 16777216 || s2 != 8193) isMultiMod = false;
+                        }
+
+                        if (isMultiMod)
+                        {
+                            // MultiMod expansion
+                            IntPtr nestedArrayPtr = _scanner.ReadIntPtr(IntPtr.Add(modPtr, 0x8));
+                            if (nestedArrayPtr == IntPtr.Zero || nestedArrayPtr.ToInt64() < 0x10000)
+                                nestedArrayPtr = _scanner.ReadIntPtr(IntPtr.Add(modPtr, 0x10));
+                            
+                            if (nestedArrayPtr != IntPtr.Zero)
+                            {
+                                int size = _scanner.ReadInt32(IntPtr.Add(nestedArrayPtr, 0x8));
+                                if (size > 0 && size < 20)
+                                {
+                                    for (int k = 0; k < size; k++)
+                                    {
+                                        IntPtr nestedModPtr = _scanner.ReadIntPtr(IntPtr.Add(nestedArrayPtr, 0x10 + k * 8));
+                                        if (nestedModPtr != IntPtr.Zero) flattenedModPtrs.Add(nestedModPtr);
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            flattenedModPtrs.Add(modPtr);
+                        }
+                    }
+
+                    // Map VTables to Acronyms
+                    for (int j = 0; j < flattenedModPtrs.Count; j++)
+                    {
+                        IntPtr modPtr = flattenedModPtrs[j];
+                        IntPtr vtable = _scanner.ReadIntPtr(modPtr);
+                        if (vtable == IntPtr.Zero) continue;
+
                         if (!_modVTableMap.ContainsKey(vtable))
                         {
-                            // Try multiple offsets for Acronym string pointer
-                            string acr = "";
-                            int[] offsets = { 0x28, 0x30, 0x38, 0x20 };
-                            foreach (var offset in offsets)
+                            // 1. Try direct read from mod object (Best)
+                            string? acr = TryReadAcronymDirectly(modPtr);
+                            
+                            // 2. Fallback to index mapping
+                            if (acr == null && j < expectedAcronyms.Length)
                             {
-                                try {
-                                    IntPtr ptr = _scanner.ReadIntPtr(IntPtr.Add(modPtr, offset));
-                                    acr = _scanner.ReadString(ptr);
-                                    if (!string.IsNullOrEmpty(acr) && acr.Length >= 2 && acr.Length <= 4 && System.Text.RegularExpressions.Regex.IsMatch(acr, "^[A-Z0-9]+$"))
-                                        break;
-                                    acr = "";
-                                } catch { }
+                                acr = expectedAcronyms[j];
                             }
 
-                            if (!string.IsNullOrEmpty(acr))
+                            if (acr != null)
                             {
                                 _modVTableMap[vtable] = acr;
-                                WriteLog($"Mapped VTable {vtable:X} to {acr} (Type: {modType})");
+                                WriteLog($"Mapped VTable {vtable:X} to {acr} (Type: {categoryName}, Index: {j})");
                             }
                         }
                     }
                 }
                 
-                // Final check: if map is still empty, something is fundamentally wrong with dict reading
                 if (_modVTableMap.Count == 0)
                 {
-                    WriteLog("BuildModVTableMap: Failed to extract any mods dynamically.");
+                    WriteLog("BuildModVTableMap: Failed to extract any mods.");
                 }
             }
             catch (Exception ex)
@@ -491,8 +662,15 @@ namespace OsuGrind.LiveReading
         public bool CheckIfSongSelect(IntPtr address)
         {
             if (_gameBaseAddress == IntPtr.Zero || address == IntPtr.Zero) return false;
-            // SoloSongSelect has a <game>k__BackingField that points to OsuGame
+            
+            // Try current offset from json
             IntPtr songSelectGame = _scanner.ReadIntPtr(IntPtr.Add(address, Offsets.SoloSongSelect.game));
+
+            // Try backup offset if failed
+            if (songSelectGame != _gameBaseAddress)
+            {
+                songSelectGame = _scanner.ReadIntPtr(IntPtr.Add(address, 1272));
+            }
 
             WriteLogThrottled("check-songselect", $"CheckIfSongSelect: Screen={address:X}, ScreenGame={songSelectGame:X}, GameBase={_gameBaseAddress:X}");
 
@@ -849,6 +1027,11 @@ namespace OsuGrind.LiveReading
                     snapshot.StateNumber = 0; // Connected but can't find screen (Menu?)
                     // Even if we can't find the screen, we might be able to read the beatmap
                     ReadBeatmap(snapshot);
+                    
+                    var mods = ReadModsFromMemory();
+                    snapshot.ModsList = mods;
+                    snapshot.Mods = (mods != null && mods.Count > 0) ? string.Join(",", mods) : "NM";
+
                     snapshot.Stars = _staticStars;
                     snapshot.BPM = (int?)Math.Round(_staticBpm);
                     snapshot.MinBPM = (int?)Math.Round(_minBpm);
@@ -1004,6 +1187,9 @@ namespace OsuGrind.LiveReading
                         uint modsBits = GetModsBits(mods);
                         double clockRate = GetClockRate();
 
+                        snapshot.ModsList = mods;
+                        snapshot.Mods = mods.Count > 0 ? string.Join(",", mods) : "NM";
+
                         // 4. Update RosuService context using Raw Beatmap Info
                         var rawBeatmapInfo = ReadRawBeatmapInfoCached();
                         if (rawBeatmapInfo != null && !string.IsNullOrEmpty(rawBeatmapInfo.MD5Hash))
@@ -1019,7 +1205,8 @@ namespace OsuGrind.LiveReading
                             }
                             else
                             {
-                                osuFile = ResolveOsuFileByHash(rawBeatmapInfo.BeatmapSetInfoPtr, rawBeatmapInfo.FileHash);
+                                string? resolvedOsuFile = ResolveOsuFileByHash(rawBeatmapInfo.BeatmapSetInfoPtr, rawBeatmapInfo.FileHash);
+                                osuFile = resolvedOsuFile ?? "";
                                 _lastResolvedMd5 = rawBeatmapInfo.FileHash;
                             }
 
@@ -1142,9 +1329,6 @@ namespace OsuGrind.LiveReading
                         {
                             WriteLog("GetStats: ReadRawBeatmapInfoCached returned null or empty hash");
                         }
-
-                        snapshot.ModsList = mods;
-                        snapshot.Mods = mods.Count > 0 ? string.Join(",", mods) : "NM";
 
                     }
                     // Priority 4: Menu/Other (No specific screen or multiplayer detected)
@@ -1396,6 +1580,9 @@ namespace OsuGrind.LiveReading
         {
             try
             {
+                // Reset mod settings before reading
+                _currentModSettings = new ModSettings();
+
                 // Read Mods and Clock Rate EARLY for use in Fail detection
                 List<string> modsList = ReadMods(scoreInfoPtr);
 
@@ -1403,6 +1590,14 @@ namespace OsuGrind.LiveReading
                 long standardizedScore = _scanner.ReadInt64(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.TotalScore));
                 snapshot.Accuracy = _scanner.ReadDouble(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.Accuracy));
                 snapshot.MaxCombo = _scanner.ReadInt32(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.MaxCombo));
+
+                // Read Maximum Statistics for reliable total object count
+                IntPtr maxStatsDict = _scanner.ReadIntPtr(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.maximumStatistics));
+                if (maxStatsDict != IntPtr.Zero)
+                {
+                    int totalObjects = GetObjectCountFromMaxStatistics(maxStatsDict);
+                    if (totalObjects > 0) snapshot.TotalObjects = totalObjects;
+                }
 
                 // Read current combo from ScoreProcessor (Bindable) instead of ScoreInfo for live updates
                 // Validation: If heavily negative time (intro), assume stats are zero
@@ -1479,9 +1674,9 @@ namespace OsuGrind.LiveReading
 
                 // Read Mods and Clock Rate (Already read above)
                 // List<string> modsList = ReadMods(scoreInfoPtr);
-                _currentModsList = modsList;
+                if (modsList != null) _currentModsList = modsList;
                 snapshot.ModsList = modsList;
-                snapshot.Mods = modsList.Count > 0 ? string.Join(",", modsList) : "NM";
+                snapshot.Mods = modsList != null && modsList.Count > 0 ? string.Join(",", modsList) : "NM";
 
 
                 double clockRate = GetClockRate();
@@ -1491,7 +1686,7 @@ namespace OsuGrind.LiveReading
                 if (clockRate < 0.1 || clockRate > 5.0) clockRate = 1.0;
 
                 // Sync Difficulty Attributes if mods are active
-                if (!string.IsNullOrEmpty(_currentOsuFilePath))
+                if (!string.IsNullOrEmpty(_currentOsuFilePath) && modsList != null)
                 {
                     var (modAR, modCS, modOD, modHP) = _rosuService.GetDifficultyAttributes(
                         _currentOsuFilePath,
@@ -1622,7 +1817,18 @@ namespace OsuGrind.LiveReading
         {
             try
             {
+                // Reset settings before reading from result screen score
+                _currentModSettings = new ModSettings();
+
                 long standardizedScore = ReadResultScoreInfo(scoreInfoPtr, snapshot);
+
+                // Read Maximum Statistics for reliable total object count
+                IntPtr maxStatsDict = _scanner.ReadIntPtr(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.maximumStatistics));
+                if (maxStatsDict != IntPtr.Zero)
+                {
+                    int totalObjects = GetObjectCountFromMaxStatistics(maxStatsDict);
+                    if (totalObjects > 0) snapshot.TotalObjects = totalObjects;
+                }
                 
                 // FIXED: Read mods from the SCORE itself, not the global selected mods (which might be reset)
                 List<string> modsList = ReadMods(scoreInfoPtr);
@@ -2157,9 +2363,10 @@ namespace OsuGrind.LiveReading
         {
             try
             {
-                if (_modVTableMap.Count == 0 && _gameBaseAddress != IntPtr.Zero)
+                int currentGamemode = ReadGamemode();
+                if ((_modVTableMap.Count == 0 || currentGamemode != _lastGamemode) && _gameBaseAddress != IntPtr.Zero)
                 {
-                    BuildModVTableMap();
+                    BuildModVTableMap(currentGamemode);
                 }
 
                 _currentModSettings = new ModSettings(); // Reset
@@ -2173,12 +2380,17 @@ namespace OsuGrind.LiveReading
                 }
 
                 // SelectedMods is a BindableList<T>
+                IntPtr bindableMT = _scanner.ReadIntPtr(bindableMods);
                 IntPtr listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x18));
                 if (listPtr == IntPtr.Zero) listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x20));
                 if (listPtr == IntPtr.Zero) listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x10));
+                if (listPtr == IntPtr.Zero) listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x28));
+                if (listPtr == IntPtr.Zero) listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x30));
+                if (listPtr == IntPtr.Zero) listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x38));
+                if (listPtr == IntPtr.Zero) listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x40));
 
 
-                WriteLog($"ReadModsFromMemory: bindableMods={bindableMods:X}, listPtr={listPtr:X}");
+                WriteLog($"ReadModsFromMemory: bindableMods={bindableMods:X}, MT={bindableMT:X}, listPtr={listPtr:X}");
 
                 if (listPtr != IntPtr.Zero)
                 {
@@ -2300,27 +2512,32 @@ namespace OsuGrind.LiveReading
                             // A null value becomes -1 when passed to rosu-pp, meaning "don't override".
 
 
+                            // DA logic refined from tosu: Mod -> BindableNumber -> .Current -> .Value
                             if (approachRateBindable != IntPtr.Zero)
                             {
-                                float val = _scanner.ReadFloat(IntPtr.Add(approachRateBindable, 0x48));
+                                IntPtr currentBindable = _scanner.ReadIntPtr(IntPtr.Add(approachRateBindable, 0x60));
+                                float val = _scanner.ReadFloat(IntPtr.Add(currentBindable != IntPtr.Zero ? currentBindable : approachRateBindable, 0x40));
                                 if (val != 0) _currentModSettings.AR = (double)val;
                                 else _currentModSettings.AR = null;
                             }
                             if (circleSizeBindable != IntPtr.Zero)
                             {
-                                float val = _scanner.ReadFloat(IntPtr.Add(circleSizeBindable, 0x48));
+                                IntPtr currentBindable = _scanner.ReadIntPtr(IntPtr.Add(circleSizeBindable, 0x60));
+                                float val = _scanner.ReadFloat(IntPtr.Add(currentBindable != IntPtr.Zero ? currentBindable : circleSizeBindable, 0x40));
                                 if (val != 0) _currentModSettings.CS = (double)val;
                                 else _currentModSettings.CS = null;
                             }
                             if (overallDifficultyBindable != IntPtr.Zero)
                             {
-                                float val = _scanner.ReadFloat(IntPtr.Add(overallDifficultyBindable, 0x48));
+                                IntPtr currentBindable = _scanner.ReadIntPtr(IntPtr.Add(overallDifficultyBindable, 0x60));
+                                float val = _scanner.ReadFloat(IntPtr.Add(currentBindable != IntPtr.Zero ? currentBindable : overallDifficultyBindable, 0x40));
                                 if (val != 0) _currentModSettings.OD = (double)val;
                                 else _currentModSettings.OD = null;
                             }
                             if (drainRateBindable != IntPtr.Zero)
                             {
-                                float val = _scanner.ReadFloat(IntPtr.Add(drainRateBindable, 0x48));
+                                IntPtr currentBindable = _scanner.ReadIntPtr(IntPtr.Add(drainRateBindable, 0x60));
+                                float val = _scanner.ReadFloat(IntPtr.Add(currentBindable != IntPtr.Zero ? currentBindable : drainRateBindable, 0x40));
                                 if (val > 0) 
                                 {
                                     if (val <= 10.1f) _currentModSettings.HP = (double)val;
@@ -2353,6 +2570,53 @@ namespace OsuGrind.LiveReading
             }
         }
 
+        private int GetObjectCountFromMaxStatistics(IntPtr dictAddr)
+        {
+            if (dictAddr == IntPtr.Zero) return 0;
+
+            int count = _scanner.ReadInt32(IntPtr.Add(dictAddr, 0x38)); // _count
+            IntPtr entriesPtr = _scanner.ReadIntPtr(IntPtr.Add(dictAddr, 0x10)); // _entries (Array)
+
+            if (entriesPtr == IntPtr.Zero) return 0;
+
+            int total = 0;
+            for (int i = 0; i < count; i++)
+            {
+                IntPtr entryAddr = IntPtr.Add(entriesPtr, 0x10 + (i * 0x10));
+                int key = _scanner.ReadInt32(IntPtr.Add(entryAddr, 0x8));
+                int value = _scanner.ReadInt32(IntPtr.Add(entryAddr, 0xC));
+
+                if (key == 0) continue;
+
+                LazerHitResults result = (LazerHitResults)key;
+                if (IsBasicHitResult(result))
+                {
+                    total += value;
+                }
+            }
+            return total;
+        }
+
+        private bool IsBasicHitResult(LazerHitResults result)
+        {
+            // tosu logic: isScorable && !isTick && !isBonus
+            bool isScorable = result == LazerHitResults.LegacyComboIncrease ||
+                              result == LazerHitResults.ComboBreak ||
+                              result == LazerHitResults.SliderTailHit ||
+                              (result >= LazerHitResults.Miss && result < LazerHitResults.IgnoreMiss);
+
+            bool isTick = result == LazerHitResults.LargeTickHit ||
+                          result == LazerHitResults.LargeTickMiss ||
+                          result == LazerHitResults.SmallTickHit ||
+                          result == LazerHitResults.SmallTickMiss ||
+                          result == LazerHitResults.SliderTailHit;
+
+            bool isBonus = result == LazerHitResults.SmallBonus ||
+                           result == LazerHitResults.LargeBonus;
+
+            return isScorable && !isTick && !isBonus;
+        }
+
         private List<string> ReadMods(IntPtr scoreInfoPtr)
         {
             var mods = new List<string>();
@@ -2363,36 +2627,46 @@ namespace OsuGrind.LiveReading
 
                 if (!string.IsNullOrEmpty(json))
                 {
-                    // Lazer mods json: [{"acronym":"HD"},{"acronym":"HR"}]
+                    // Lazer mods json: [{"acronym":"HD"},{"acronym":"HR"}] or with settings
                     var jArray = Newtonsoft.Json.Linq.JArray.Parse(json);
                     foreach (var m in jArray)
                     {
                         string? acr = m["acronym"]?.ToString();
-                        if (!string.IsNullOrEmpty(acr)) mods.Add(acr);
+                        if (!string.IsNullOrEmpty(acr))
+                        {
+                            mods.Add(acr);
+
+                            // Extract settings for PP calculation
+                            var settings = m["settings"];
+                            if (settings != null)
+                            {
+                                if (acr == "DT" || acr == "HT" || acr == "NC")
+                                {
+                                    double? speed = (double?)settings["speed_change"];
+                                    if (speed.HasValue) _currentModSettings.SpeedChange = speed;
+                                }
+                                else if (acr == "DA")
+                                {
+                                    _currentModSettings.AR = (double?)settings["approach_rate"];
+                                    _currentModSettings.CS = (double?)settings["circle_size"];
+                                    _currentModSettings.OD = (double?)settings["overall_difficulty"];
+                                    _currentModSettings.HP = (double?)settings["drain_rate"];
+                                }
+                            }
+                        }
                     }
                 }
             }
             catch { }
-
-            // FALLBACK: Read from ScoreInfo.Mods (IReadOnlyList<Mod>)
-            if (mods.Count == 0)
-            {
-                try
-                {
-                    IntPtr modsListPtr = _scanner.ReadIntPtr(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.statistics + 8)); // Usually after stats
-                    // This is complex because we don't have the exact offset for ScoreInfo.Mods
-                    // But we can try common ones if Json failed
-                }
-                catch { }
-            }
 
             if (mods.Count == 0) mods.Add("NM");
             return mods;
         }
 
 
-        private uint GetModsBits(List<string> mods)
+        private uint GetModsBits(List<string>? mods)
         {
+            if (mods == null) return 0;
             uint bits = 0;
             foreach (var m in mods)
             {
@@ -2407,6 +2681,7 @@ namespace OsuGrind.LiveReading
                     case "DT": bits |= 64; break;
                     case "RX": bits |= 128; break;
                     case "HT": bits |= 256; break;
+                    case "DC": bits |= 256; break;
                     case "NC": bits |= 512 | 64; break;
                     case "FL": bits |= 1024; break;
                     case "AT": break; // Ignore Autoplay for PP calculation
@@ -2489,7 +2764,7 @@ namespace OsuGrind.LiveReading
             if (_currentModsList != null)
             {
                 if (_currentModsList.Contains("DT") || _currentModsList.Contains("NC")) return 1.5;
-                if (_currentModsList.Contains("HT")) return 0.75;
+                if (_currentModsList.Contains("HT") || _currentModsList.Contains("DC")) return 0.75;
             }
 
             return 1.0;

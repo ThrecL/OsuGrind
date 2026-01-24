@@ -333,7 +333,7 @@ namespace OsuGrind.LiveReading
                         }
                     }
 
-                    if (snapshot.HitCounts != null && _rosuService != null && _rosuService.IsLoaded)
+                    if (snapshot.HitCounts != null && _rosuService != null && _rosuService.IsLoaded && snapshot.ModsList != null)
                     {
                         uint rosuMods = RosuService.ModsToRosuStats(snapshot.ModsList);
                         double clockRate = RosuService.GetClockRateFromMods(rosuMods);

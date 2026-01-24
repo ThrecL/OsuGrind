@@ -396,7 +396,10 @@ namespace OsuGrind.Services
                     case "SO": val |= 4096; break;
                     case "AP": val |= 8192; break;
                     case "PF": val |= 16384 | 32; break;
+                    case "DC": val |= 256; break; // Daycore is HT variant
                     case "CL": val |= (1u << 24); break;
+                    case "MR": val |= (1u << 30); break; // Mirror (if supported)
+                    case "BL": val |= (1u << 31); break; // Blind (if supported)
                 }
             }
             return val;

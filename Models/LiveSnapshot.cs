@@ -215,7 +215,7 @@ public sealed class LiveSnapshot
 
     public static LiveSnapshot FromTosuJson(JObject j)
     {
-        if (j["state"] != null && j["state"]["number"] != null)
+        if (j["state"]?["number"] != null)
             return FromTosuJsonV2(j);
         return FromTosuJsonV1(j);
     }
