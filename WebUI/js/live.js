@@ -116,7 +116,9 @@ class LiveModule {
         this.elements = {};
         this.slots = {};
         this.lastModsJson = "";
+        this.lastState = "Idle";
     }
+
 
     init() {
         this.cacheElements();
@@ -199,7 +201,21 @@ class LiveModule {
         const state = data.playState || 'Idle';
         const isPlaying = state === 'Playing' || state === 'Results' || state === 'Replay' || state === 'Paused';
 
+        // Proactive Reset when starting a new play
+        if (isPlaying && this.lastState !== state && (state === 'Playing' || state === 'Replay')) {
+            if (this.slots.accuracy) this.slots.accuracy.setValue(1.0);
+            if (this.slots.combo) this.slots.combo.setValue(0);
+            if (this.slots.score) this.slots.score.setValue(0);
+            if (this.slots.pp) this.slots.pp.setValue(0);
+            if (this.slots.count300) this.slots.count300.setValue(0);
+            if (this.slots.count100) this.slots.count100.setValue(0);
+            if (this.slots.count50) this.slots.count50.setValue(0);
+            if (this.slots.countMiss) this.slots.countMiss.setValue(0);
+        }
+        this.lastState = state;
+
         // Accuracy normalize check
+
         const acc = data.accuracy != null ? data.accuracy : 1.0;
         if (this.slots.accuracy) this.slots.accuracy.setValue(acc);
         if (this.slots.combo) this.slots.combo.setValue(isPlaying ? (data.combo || 0) : (data.mapMaxCombo || 0));

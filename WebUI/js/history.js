@@ -450,7 +450,18 @@ class HistoryModule {
                 h50: new window.SlotNumber(document.getElementById('analysis-50')),
                 miss: new window.SlotNumber(document.getElementById('analysis-miss'))
             };
+            
+            // Explicit initial reset to avoid carrying over old values
+            window.analysisSlots.acc.setValue(1);
+            window.analysisSlots.combo.setValue(0);
+            window.analysisSlots.pp.setValue(0);
+            window.analysisSlots.ur.setValue(0);
+            window.analysisSlots.h300.setValue(0);
+            window.analysisSlots.h100.setValue(0);
+            window.analysisSlots.h50.setValue(0);
+            window.analysisSlots.miss.setValue(0);
         }
+
 
         this.loadRewindPlayer(score.id, modal);
 

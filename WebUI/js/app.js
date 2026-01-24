@@ -98,10 +98,12 @@ class OsuGrindApp {
                         }
 
                         // Intro Support: If no hits yet, find position by time to show metadata
-                        if (targetHits === 0 && playbackTime > 0 && bestIdx === 0) {
+                        if (targetHits === 0 && playbackTime >= 0 && bestIdx === 0) {
                             const lastEntry = timeline[timeline.length - 1];
                             const totalDurationMs = lastEntry[7] || 0;
                             let targetMs = playbackTime;
+                            
+                            // Heuristic to detect if time is in seconds or ms
                             if (targetMs > 0 && targetMs < totalDurationMs / 10) targetMs *= 1000;
 
                             let low = 0, high = timeline.length - 1;

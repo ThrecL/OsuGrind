@@ -78,6 +78,10 @@ public class LazerScoreDetector
                     _ppTimeline.Clear();
                     _lastCombo = 0; _lastMisses = 0; _lastH300 = 0; _lastH100 = 0; _lastH50 = 0;
                     _lastSliderTail = 0; _lastSmallTick = 0; _lastLargeTick = 0;
+                    
+                    // Add an initial clean 0-stats frame
+                    _ppTimeline.Add(new object[] { 0.0, 0, 1.0, 0, 0, 0, 0, 0, 0, 0 });
+                    
                     DebugService.Log($"[LazerDetector] Play Started. IsReplay={_isReplaySession}", "Detector");
                 }
                 _stateBeforeLast = _prevState; _prevState = _lastState; _lastState = snapshot.StateNumber; _lastStateChangeTime = now;
