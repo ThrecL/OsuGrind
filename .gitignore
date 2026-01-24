@@ -1,0 +1,38 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.sln.docstates
+
+# Rust
+target/
+**/*.rs.bk
+build_errors.txt
+
+# Database
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Secrets & Config
+secrets.json
+
+# Logs & Temp
+score_debug.txt
+*.log
+*.txt
+temp/
+
+# Scripts
+*.py
+
+# IDE
+.vs/
+.idea/
+.vscode/
+
+# Agent Documentation
+AGENTS.md
+opencode.json

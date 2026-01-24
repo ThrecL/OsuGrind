@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSU!GRIND</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/live.css">
+    <link rel="stylesheet" href="css/analytics.css">
+    <link rel="stylesheet" href="css/history.css">
+    <link rel="stylesheet" href="css/settings.css">
+    <link rel="stylesheet" href="css/profile.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <!-- Title Bar (custom, draggable) -->
+    <header id="titlebar">
+        <div class="titlebar-left">
+            <img src="/osugrind_icon.png" alt="OsuGrind" class="app-icon">
+            <span class="app-title">OSU!GRIND</span>
+            <div class="status-pill" id="connectionStatus">
+                <span class="status-dot"></span>
+                <span class="status-text">Connecting…</span>
+            </div>
+            <span class="separator">|</span>
+            <button class="profile-button" id="profileBtn">
+                <div class="avatar-placeholder" id="avatarPlaceholder">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="#888">
+                        <path
+                            d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z" />
+                    </svg>
+                </div>
+                <img src="" alt="" class="avatar-img" id="avatarImg" style="display:none;">
+                <span class="profile-name" id="profileName">Login with osu!</span>
+            </button>
+        </div>
+        <div class="titlebar-right">
+            <button class="titlebar-btn" id="settingsBtn" title="Settings">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,11.67 4.53,11.34 4.57,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z" />
+                </svg>
+            </button>
+            <button class="titlebar-btn" id="minimizeBtn">
+                <svg width="10" height="10" viewBox="0 0 10 10">
+                    <path d="M0 5h10" stroke="currentColor" stroke-width="1" />
+                </svg>
+            </button>
+            <button class="titlebar-btn" id="maximizeBtn">
+                <svg width="10" height="10" viewBox="0 0 10 10">
+                    <rect width="10" height="10" stroke="currentColor" stroke-width="1" fill="none" />
+                </svg>
+            </button>
+            <button class="titlebar-btn close-btn" id="closeBtn">
+                <svg width="10" height="10" viewBox="0 0 10 10">
+                    <path d="M0 0L10 10M0 10L10 0" stroke="currentColor" stroke-width="1.5" />
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Status Bar -->
+    <div id="statusbar">
+        <div class="status-left">
+            <div class="stat-pill">
+                <span class="stat-label">PAST 24H</span>
+                <span class="stat-value gradient-green" id="plays24h">0 plays</span>
+            </div>
+            <div class="stat-pill">
+                <span class="stat-label">SESSION</span>
+                <span class="stat-value neon-cyan" id="sessionTimer">00:00:00</span>
+            </div>
+        </div>
+        <div class="status-right">
+            <div class="stat-pill streak-pill" id="streakPill" style="display:none;">
+                <span class="streak-icon">🔥</span>
+                <span class="stat-value gradient-orange" id="streakCount">0</span>
+                <span class="stat-suffix">day</span>
+            </div>
+            <div class="stat-pill">
+                <span class="stat-label">PLAYING</span>
+                <span class="stat-value neon-purple" id="playingTimer">00:00:00</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <nav id="tabs">
+        <button class="tab active" data-tab="live">⚡ LIVE</button>
+        <button class="tab" data-tab="analytics">📊 ANALYTICS</button>
+        <button class="tab" data-tab="history">📜 HISTORY</button>
+        <button class="tab" data-tab="settings" style="display:none;">⚙️ SETTINGS</button>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main id="content">
+        <!-- Live Tab -->
+        <section id="tab-live" class="tab-content active">
+            <div class="live-background" id="liveBackground"></div>
+            <div class="live-overlay"></div>
+            <div class="live-content">
+                <!-- Top Section: Map Info -->
+                <div class="live-header">
+                    <div class="map-info">
+                        <h1 class="map-title" id="mapTitle">No Map Selected</h1>
+                        <p class="map-artist" id="mapArtist">—</p>
+                    </div>
+                    <div class="game-state-wrapper">
+                        <span class="play-state" id="playState">Idle</span>
+                        <div class="achievement-status" id="achievementStatus"></div>
+                    </div>
+                    <div class="mods-container" id="modsContainer"></div>
+                </div>
+
+                <!-- Middle Section: Main Gameplay Stats -->
+                <div class="live-main">
+                    <div class="side-stat acc-side">
+                        <span class="side-label">ACC</span>
+                        <span class="side-value" id="accuracy">100.00%</span>
+                    </div>
+
+                    <div class="center-stat">
+                        <div class="grade-wrap">
+                            <span class="grade" id="grade">SS</span>
+                        </div>
+                        <div class="combo-wrap">
+                            <span class="combo" id="combo">0x</span>
+                        </div>
+                        <div class="score-wrap">
+                            <span class="score" id="score">0</span>
+                        </div>
+                    </div>
+
+                    <div class="side-stat pp-side">
+                        <span class="side-label">PP</span>
+                        <span class="side-value" id="pp">0</span>
+                    </div>
+                </div>
+
+                <!-- Bottom Section: Dashboard -->
+                <div class="live-dashboard">
+                    <!-- Left: Attributes -->
+                    <div class="dash-left">
+                        <span class="attr-item"><span class="attr-label">CS</span><span class="attr-value" id="cs">0</span></span>
+                        <span class="attr-item"><span class="attr-label">AR</span><span class="attr-value" id="ar">0</span></span>
+                        <span class="attr-item"><span class="attr-label">OD</span><span class="attr-value" id="od">0</span></span>
+                        <span class="attr-item"><span class="attr-label">HP</span><span class="attr-value" id="hp">0</span></span>
+                    </div>
+
+                    <!-- Center: Stars/BPM/UR -->
+                    <div class="dash-center">
+                        <div id="sr-badge-container" class="sr-badge sr-0">
+                            <span class="sr-icon">★</span>
+                            <span id="stars">0.00</span>
+                        </div>
+
+                        <span class="center-item"><span class="center-label">BPM</span><span class="center-value" id="bpm">0</span></span>
+                    </div>
+
+                    <!-- Right: Hit counts + Time -->
+                    <div class="dash-right">
+                        <div class="hit-counts">
+                            <span class="hit hit-300" id="count300">0</span>
+                            <span class="hit hit-100" id="count100">0</span>
+                            <span class="hit hit-50" id="count50">0</span>
+                            <span class="hit hit-miss" id="countMiss">0</span>
+                        </div>
+                        <div class="time-display">
+                            <span class="time-value" id="mapTime">0:00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Analytics Tab -->
+        <section id="tab-analytics" class="tab-content">
+            <div class="analytics-scroll">
+                <!-- Performance Summary -->
+                <div class="card performance-card">
+                    <div class="perf-left">
+                        <span class="perf-label neon-green">PERFORMANCE MATCH</span>
+                        <span class="perf-value" id="perfMatch">0.0%</span>
+                    </div>
+                    <div class="perf-right">
+                        <span class="perf-label neon-yellow">CURRENT FORM</span>
+                        <span class="form-value" id="currentForm">—</span>
+                        <div class="skill-insights" id="skillInsights"></div>
+                    </div>
+                </div>
+
+                <!-- Mentality Bar -->
+                <div class="card mentality-card">
+                    <div class="mentality-header">
+                        <span class="mentality-title">MENTALITY</span>
+                        <span class="mentality-pct" id="mentalityValue">0%</span>
+                    </div>
+                    <div class="mentality-track">
+                        <div class="mentality-fill" id="mentalityFill" style="width:0%"></div>
+                    </div>
+                </div>
+
+                <!-- Stats Summary -->
+                <div class="stats-row">
+                    <div class="card mini-card"><span class="mini-label">TOTAL PLAYS</span><span
+                            class="mini-value accent" id="totalPlays">0</span></div>
+                    <div class="card mini-card"><span class="mini-label">PLAY TIME</span><span
+                            class="mini-value neon-cyan" id="totalTime">0h</span></div>
+                    <div class="card mini-card"><span class="mini-label">24H AVG ACC</span><span
+                            class="mini-value neon-green" id="avgAcc">0%</span></div>
+                    <div class="card mini-card"><span class="mini-label">24H AVG PP</span><span
+                            class="mini-value neon-purple" id="avgPP">0</span></div>
+                </div>
+
+                <!-- Daily Activity Chart -->
+                <div class="card chart-card">
+                    <h3 class="chart-title gradient-purple-green">DAILY ACTIVITY</h3>
+                    <div class="chart-container">
+                        <canvas id="activityChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Performance Chart -->
+                <div class="card chart-card">
+                    <h3 class="chart-title gradient-pink-cyan">DAILY PERFORMANCE MATCH</h3>
+                    <div class="chart-container">
+                        <canvas id="performanceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- History Tab -->
+        <section id="tab-history" class="tab-content">
+            <div class="history-container">
+                <!-- Calendar View -->
+                <div id="calendarView">
+                    <div class="calendar-header">
+                        <button class="nav-btn" id="prevMonth">◀</button>
+                        <span class="month-label" id="monthLabel">January 2026</span>
+                        <button class="nav-btn" id="nextMonth">▶</button>
+                    </div>
+                    <div class="calendar-weekdays">
+                        <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                    </div>
+                    <div class="calendar-grid" id="calendarGrid"></div>
+                </div>
+
+                <!-- Day Detail View -->
+                <div id="dayView" style="display:none;">
+                    <div class="day-header">
+                        <button class="back-btn" id="backToCalendar">← Back to Calendar</button>
+                        <h2 class="day-title" id="dayTitle">January 1, 2026</h2>
+                        <div class="day-stats" id="dayStats"></div>
+                    </div>
+                    <div class="plays-list" id="playsList"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Settings Tab -->
+        <section id="tab-settings" class="tab-content">
+            <div class="settings-scroll">
+                <h2 class="settings-title">Settings</h2>
+
+                <div class="settings-group">
+                    <h3 class="group-title">Paths</h3>
+                    <div class="setting-row">
+                        <label>osu!lazer Path</label>
+                        <div class="path-input">
+                            <input type="text" id="lazerPath" readonly>
+                            <button class="browse-btn" data-path="lazer">Browse</button>
+                        </div>
+                    </div>
+                    <div class="setting-row">
+                        <label>osu!stable Path</label>
+                        <div class="path-input">
+                            <input type="text" id="stablePath" readonly>
+                            <button class="browse-btn" data-path="stable">Browse</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h3 class="group-title">General</h3>
+                    <div class="setting-row toggle-row">
+                        <label>Debug Logging (Console & Files)</label>
+                        <label class="toggle"><input type="checkbox" id="debugLogging"><span class="slider"></span></label>
+                    </div>
+                    <div class="setting-row toggle-row">
+                        <label>Combo Sounds</label>
+                        <label class="toggle"><input type="checkbox" id="comboSounds"><span
+                                class="slider"></span></label>
+                    </div>
+                    <div class="setting-row toggle-row">
+                        <label>Achievement Sounds</label>
+                        <label class="toggle"><input type="checkbox" id="achievementSounds"><span
+                                class="slider"></span></label>
+                    </div>
+                    <div class="setting-row toggle-row">
+                        <label>Pass Sound</label>
+                        <label class="toggle"><input type="checkbox" id="passSound"><span class="slider"></span></label>
+                    </div>
+                    <div class="setting-row toggle-row">
+                        <label>Fail Sound</label>
+                        <label class="toggle"><input type="checkbox" id="failSound"><span class="slider"></span></label>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h3 class="group-title">Data Management</h3>
+                    <div class="setting-row">
+                        <button class="action-btn" id="importLazerBtn">Import Lazer Scores</button>
+                        <button class="action-btn" id="importStableBtn">Import Stable Scores</button>
+                    </div>
+                    <div class="setting-row">
+                        <button class="action-btn" id="exportCsvBtn">Export CSV</button>
+                    </div>
+                </div>
+
+                <div class="settings-group danger-zone">
+                    <h3 class="group-title">Danger Zone</h3>
+                    <div class="setting-row">
+                        <button class="action-btn danger" id="deleteScoresBtn">Delete All Scores</button>
+                        <button class="action-btn danger" id="deleteBeatmapsBtn">Clear Beatmap Cache</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Profile Overlay -->
+    <div id="profileOverlay" class="overlay" style="display:none;">
+        <div class="overlay-backdrop"></div>
+        <div class="profile-panel">
+            <button class="close-overlay" id="closeProfile">×</button>
+            <div class="profile-header">
+                <div class="profile-bg" id="profileBg"></div>
+                <div class="profile-info">
+                    <img src="" alt="" class="profile-avatar" id="profileAvatar">
+                    <div class="profile-details">
+                        <h2 class="profile-username" id="profileUsername">Not logged in</h2>
+                        <div class="profile-rank" id="profileRank"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="profile-body">
+                <div class="skill-badges" id="skillBadges"></div>
+                <div class="ranking-cards" id="rankingCards"></div>
+                <div class="profile-insights" id="profileInsights"></div>
+            </div>
+            <div class="profile-footer">
+                <button class="login-btn" id="loginBtn">Login with osu!</button>
+                <button class="logout-btn" id="logoutBtn" style="display:none;">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Console (Hidden by default, toggle with 'D') -->
+    <div id="debugConsole" class="debug-console" style="display:none;">
+        <div class="debug-header">
+            <span>DEBUG CONSOLE</span>
+            <button id="clearDebug">Clear</button>
+            <button id="closeDebug">×</button>
+        </div>
+        <div id="debugOutput" class="debug-output"></div>
+    </div>
+
+    <!-- Scripts -->
+    <link rel="stylesheet" href="Assets/plyr/plyr.css" />
+    <script src="Assets/chart.js"></script>
+    <script src="Assets/plyr/plyr.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/live.js"></script>
+    <script src="js/analytics.js"></script>
+    <script src="js/history.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/profile.js"></script>
+</body>
+
+</html>

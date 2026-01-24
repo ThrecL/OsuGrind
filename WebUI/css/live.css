@@ -1,0 +1,337 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   LIVE TAB - Clean Centered Design with osu! Colors
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+#tab-live {
+    position: relative;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Background */
+.live-background {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: 0.5;
+    transition: background-image 0.8s ease;
+    filter: blur(8px) brightness(0.5);
+}
+
+/* Subtle gradient overlay */
+.live-overlay {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.6) 100%);
+}
+
+.live-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 20px 30px;
+    box-sizing: border-box;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER - Centered
+   ═══════════════════════════════════════════════════════════════════════════ */
+.live-header {
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.map-title {
+    font-size: 22px;
+    font-weight: 800;
+    color: #fff;
+    margin: 0;
+    max-width: 700px;
+    margin: 0 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.map-artist {
+    font-size: 12px;
+    font-weight: 600;
+    color: #ff66ab;
+    margin: 4px 0 0 0;
+}
+
+.game-state-wrapper {
+    margin-top: 6px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+}
+
+.play-state {
+    font-size: 10px;
+    font-weight: 700;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.achievement-status {
+    font-size: 11px;
+    font-weight: 800;
+    color: #ffcc22;
+}
+
+.mods-container {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.mod-icon {
+    width: 45px;
+    height: 32px;
+    object-fit: contain;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+    transition: transform 0.15s ease;
+}
+
+.mod-icon:hover {
+    transform: scale(1.1);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MAIN STATS - Forced Horizontal HUD
+   ═══════════════════════════════════════════════════════════════════════════ */
+.live-main {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    gap: 30px;
+    width: 100%;
+    flex-wrap: nowrap; /* Prevent vertical wrapping */
+}
+
+.side-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 160px; /* Fixed width for symmetry */
+    height: 100%;
+}
+
+.side-label {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 3px;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+}
+
+.acc-side .side-label { color: #40c4ff; } /* Official osu! Blue */
+.pp-side .side-label { color: #ff66ab; }  /* Official osu! Pink */
+
+.side-value {
+    font-size: 48px;
+    font-weight: 950;
+    color: #fff;
+    display: flex;
+    line-height: 1;
+}
+
+.center-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 220px;
+    height: 100%;
+}
+
+.grade {
+    font-size: 100px;
+    font-weight: 950;
+    line-height: 0.8;
+    margin-bottom: 10px;
+}
+
+/* Official osu! Grade Colors - Standardized */
+.grade.X, .grade.SS { 
+    color: #FFD700; 
+    filter: drop-shadow(0 0 20px rgba(255, 215, 0, 0.5));
+}
+.grade.XH, .grade.SSH { 
+    color: #E3F2FD; 
+    filter: drop-shadow(0 0 20px rgba(227, 242, 253, 0.8));
+}
+.grade.S { color: #F7C600; }
+.grade.SH { color: #B2EBF2; }
+.grade.A { color: #8CFF00; }
+.grade.B { color: #00BFFF; }
+.grade.C { color: #FF00FF; }
+.grade.D { color: #FF4500; }
+.grade.F { color: #757575; }
+
+.stars-value {
+    transition: color 0.3s ease;
+}
+
+.combo {
+    font-size: 38px;
+    font-weight: 950;
+    color: #fff;
+    display: flex;
+    line-height: 1;
+}
+
+.score {
+    font-size: 14px;
+    font-weight: 700;
+    color: #757575;
+    display: flex;
+    margin-top: 4px;
+    letter-spacing: 2px;
+}
+
+/* The container for a single digit */
+.digit-container {
+    display: inline-flex;
+    flex-direction: column;
+    height: 1.1em;
+    overflow: hidden;
+    line-height: 1.1em;
+    position: relative;
+}
+
+/* The sliding strip of numbers */
+.digit-strip {
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform;
+}
+
+.digit-strip span {
+    display: block;
+    height: 1.1em;
+    text-align: center;
+}
+
+@keyframes comboHeartbeat {
+    0% { transform: scale(1); }
+    30% { transform: scale(1.08); filter: brightness(1.2); }
+    100% { transform: scale(1); }
+}
+
+/* Only apply pop to combo element */
+#combo.changed {
+    animation: comboHeartbeat 0.3s ease-out;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DASHBOARD - Transparent, No Box
+   ═══════════════════════════════════════════════════════════════════════════ */
+.live-dashboard {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    flex-shrink: 0;
+}
+
+.dash-left {
+    display: flex;
+    gap: 20px;
+}
+
+.attr-item {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+}
+
+.attr-label {
+    font-size: 11px;
+    font-weight: 800;
+    color: #ff66ab;
+}
+
+.attr-value {
+    font-size: 16px;
+    font-weight: 800;
+    color: #fff;
+}
+
+.dash-center {
+    display: flex;
+    gap: 25px;
+}
+
+.center-item {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+}
+
+.center-icon {
+    font-size: 14px;
+    color: #ffcc22;
+}
+
+.center-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #666;
+}
+
+.center-value {
+    font-size: 20px;
+    font-weight: 900;
+    color: #fff;
+}
+
+.dash-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.hit-counts {
+    display: flex;
+    gap: 8px;
+}
+
+.hit {
+    font-size: 14px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 4px;
+    min-width: 32px;
+    text-align: center;
+    background: rgba(255,255,255,0.05);
+}
+
+/* osu! hit judgment colors */
+.hit-300 { color: #66ccff; border: 1px solid rgba(102, 204, 255, 0.3); }
+.hit-100 { color: #88cc00; border: 1px solid rgba(136, 204, 0, 0.3); }
+.hit-50 { color: #ffcc22; border: 1px solid rgba(255, 204, 34, 0.3); }
+.hit-miss { color: #ee5555; border: 1px solid rgba(238, 85, 85, 0.3); }
+
+.time-display {
+    text-align: right;
+}
+
+.time-value {
+    font-size: 24px;
+    font-weight: 900;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+}

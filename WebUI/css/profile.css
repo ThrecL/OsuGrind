@@ -1,0 +1,205 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PROFILE OVERLAY Styles
+═══════════════════════════════════════════════════════════════════════════ */
+
+.profile-panel {
+    position: relative;
+    width: 600px;
+    max-height: 80vh;
+    background: var(--bg-secondary);
+    border: 1px solid #333;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    z-index: 10;
+    animation: slideUp 0.3s ease;
+}
+
+.profile-header {
+    position: relative;
+    height: 180px;
+}
+
+.profile-bg {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    filter: blur(30px) brightness(0.5);
+}
+
+.profile-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, transparent, var(--bg-secondary));
+}
+
+.profile-info {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    gap: 20px;
+    padding: 20px;
+    height: 100%;
+}
+
+.profile-avatar {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    border: 4px solid var(--accent-pink);
+    object-fit: cover;
+    box-shadow: 0 0 20px rgba(255, 102, 171, 0.4);
+}
+
+.profile-details {
+    flex: 1;
+    padding-bottom: 8px;
+}
+
+.profile-username {
+    font-size: 28px;
+    font-weight: 900;
+    color: white;
+    margin-bottom: 4px;
+}
+
+.profile-rank {
+    font-size: 14px;
+    color: var(--text-muted);
+}
+
+.profile-rank strong {
+    color: var(--accent-cyan);
+}
+
+.profile-body {
+    padding: 20px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Skill Badges */
+.skill-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.skill-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-tertiary);
+    border: 1px solid #333;
+    border-radius: var(--radius-xl);
+    padding: 6px 12px;
+}
+
+.badge-icon {
+    font-size: 16px;
+}
+
+.badge-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.badge-value {
+    font-size: 13px;
+    font-weight: 700;
+    color: white;
+}
+
+/* Ranking Cards */
+.ranking-cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.ranking-card {
+    background: var(--bg-tertiary);
+    border: 1px solid #222;
+    border-radius: var(--radius-lg);
+    padding: 16px;
+}
+
+.ranking-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.ranking-value {
+    font-size: 24px;
+    font-weight: 900;
+}
+
+.ranking-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* Insights */
+.profile-insights {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.insight {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.insight-icon {
+    font-size: 14px;
+}
+
+.profile-footer {
+    padding: 20px;
+    border-top: 1px solid #222;
+    display: flex;
+    justify-content: center;
+}
+
+.login-btn {
+    background: linear-gradient(90deg, var(--accent-pink), var(--accent-purple));
+    border: none;
+    border-radius: var(--radius-xl);
+    padding: 12px 30px;
+    color: white;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.login-btn:hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 20px rgba(255, 102, 171, 0.4);
+}
+
+.logout-btn {
+    background: transparent;
+    border: 1px solid var(--accent-red);
+    border-radius: var(--radius-xl);
+    padding: 12px 30px;
+    color: var(--accent-red);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.logout-btn:hover {
+    background: rgba(255, 85, 102, 0.1);
+}

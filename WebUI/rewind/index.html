@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Rewind</title>
+    <base href="./">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+  <link rel="stylesheet" href="styles.ef46db3751d8e999.css"></head>
+  <body>
+    <div id="root"></div>
+    <script>
+      window.global = window;
+      window.__OSUGRIND_CONTEXT__ = true;
+      window.require = function(mod) {
+        if (mod === 'url') return { 
+          parse: (u) => new URL(u, window.location.href),
+          format: (o) => (o instanceof URL ? o.toString() : new URL(o, window.location.href).toString()),
+          resolve: (from, to) => new URL(to, new URL(from, window.location.href)).toString()
+        };
+        if (mod === 'path') {
+          const path = {
+            join: (...args) => args.filter(Boolean).join('/').replace(/\/+/g, '/'),
+            resolve: (...args) => args.filter(Boolean).join('/').replace(/\/+/g, '/'),
+            basename: (p) => p.split('/').pop(),
+            dirname: (p) => p.split('/').slice(0, -1).join('/') || '.'
+          };
+          path.posix = path;
+          return path;
+        }
+        if (mod === 'events') return {
+          EventEmitter: class {
+            constructor() { this._l = {}; }
+            on(e, cb) { (this._l[e] = this._l[e] || []).push(cb); return this; }
+            once(e, cb) { const f = (...a) => { this.off(e, f); cb(...a); }; return this.on(e, f); }
+            off(e, cb) { this._l[e] = (this._l[e] || []).filter(c => c !== cb); return this; }
+            emit(e, ...a) { (this._l[e] || []).forEach(c => c(...a)); return true; }
+            removeListener(e, cb) { return this.off(e, cb); }
+            removeAllListeners(e) { if(e) delete this._l[e]; else this._l = {}; return this; }
+          }
+        };
+        if (mod === 'electron') return {
+          ipcRenderer: { on: () => {}, send: () => {}, removeListener: () => {}, invoke: () => Promise.resolve() }
+        };
+        if (mod === 'fs') return { 
+          promises: { readFile: () => Promise.reject('fs not available'), access: () => Promise.reject() },
+          readFileSync: () => { throw new Error('fs not available'); },
+          constants: { R_OK: 4, W_OK: 2, F_OK: 0 }
+        };
+        if (mod === 'crypto') return {
+          createHash: (alg) => ({
+            update: (d) => ({ digest: () => 'deadbeef' + Math.random().toString(16).slice(2) }),
+            digest: () => 'deadbeef'
+          })
+        };
+        console.warn('[OsuGrind] Missing polyfill for require("' + mod + '")');
+        return {};
+      };
+    </script>
+  <script src="polyfills.328101a596000083.esm.js" type="module"></script><script src="main.4d47055f88cbf165.esm.js" type="module"></script></body>
+</html>
