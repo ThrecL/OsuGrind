@@ -1648,10 +1648,16 @@ namespace OsuGrind.LiveReading
         {
             long standardizedScore = _scanner.ReadInt64(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.TotalScore));
             snapshot.Accuracy = _scanner.ReadDouble(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.Accuracy));
-            snapshot.Combo = _scanner.ReadInt32(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.Combo));
-            snapshot.MaxCombo = _scanner.ReadInt32(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.MaxCombo));
+            
+            // Try reading both fields to ensure we catch the highest combo
+            int maxC = _scanner.ReadInt32(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.MaxCombo));
+            int curC = _scanner.ReadInt32(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.Combo));
+            
+            snapshot.MaxCombo = Math.Max(maxC, curC);
+            snapshot.Combo = snapshot.MaxCombo;
 
             try
+
             {
                 long dateTicks = _scanner.ReadInt64(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.Date));
                 if (dateTicks > 0)

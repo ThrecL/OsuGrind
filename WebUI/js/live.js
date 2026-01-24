@@ -201,6 +201,17 @@ class LiveModule {
         const state = data.playState || 'Idle';
         const isPlaying = state === 'Playing' || state === 'Results' || state === 'Replay' || state === 'Paused';
 
+        // Hit Counts extraction
+        const hits = data.hitCounts || {};
+        const h300 = hits.great ?? 0;
+        const h100 = hits.ok ?? 0;
+        const h50 = hits.meh ?? 0;
+        const hMiss = hits.miss ?? 0;
+        const totalHits = h300 + h100 + h50 + hMiss;
+
+        // Replay Suppression: Forced reset until first object passes
+        const suppressStats = (state === 'Replay' && totalHits === 0);
+
         // Proactive Reset when starting a new play
         if (isPlaying && this.lastState !== state && (state === 'Playing' || state === 'Replay')) {
             if (this.slots.accuracy) this.slots.accuracy.setValue(1.0);
@@ -215,15 +226,40 @@ class LiveModule {
         this.lastState = state;
 
         // Accuracy normalize check
-
-        const acc = data.accuracy != null ? data.accuracy : 1.0;
+        const acc = (data.accuracy != null && !suppressStats) ? data.accuracy : 1.0;
         if (this.slots.accuracy) this.slots.accuracy.setValue(acc);
-        if (this.slots.combo) this.slots.combo.setValue(isPlaying ? (data.combo || 0) : (data.mapMaxCombo || 0));
-        if (this.slots.score) this.slots.score.setValue(data.score || 0);
+        
+        if (this.slots.combo) {
+            let comboVal = 0;
+            if (state === 'Results') {
+                comboVal = data.maxCombo || 0; // Highest combo achieved
+            } else if (isPlaying && !suppressStats) {
+                comboVal = data.combo || 0;
+            } else if (!isPlaying) {
+                comboVal = data.mapMaxCombo || 0;
+            }
+            this.slots.combo.setValue(comboVal);
+        }
+
+        if (this.slots.score) {
+            const scoreVal = (isPlaying && !suppressStats) ? (data.score || 0) : (isPlaying ? 0 : (data.score || 0));
+            this.slots.score.setValue(scoreVal);
+        }
+
         if (this.slots.pp) {
-            const ppVal = isPlaying ? (data.pp || 0) : (data.ppIfFc || 0);
+            let ppVal = 0;
+            if (state === 'Results') {
+                ppVal = data.pp || 0;
+            } else if (isPlaying && !suppressStats) {
+                ppVal = data.pp || 0;
+            } else if (isPlaying && suppressStats) {
+                ppVal = 0;
+            } else {
+                ppVal = data.ppIfFc || 0;
+            }
             this.slots.pp.setValue(ppVal);
         }
+        
         if (this.slots.stars) {
             const sr = data.stars || 0;
             this.slots.stars.setValue(sr);
@@ -238,7 +274,6 @@ class LiveModule {
                 container.classList.add(`sr-${safeLevel}`);
                 
                 // Text color logic: 0.00-6.49 (#000000BF), 6.50+ (#FFD966)
-                // Use strict check to avoid floating point issues (6.50 should be gold)
                 const textColorClass = (sr < 6.499) ? 'sr-text-0' : 'sr-text-1';
                 container.classList.add(textColorClass);
             }
@@ -247,7 +282,7 @@ class LiveModule {
 
         // Grade
         if (el.grade) {
-            const grade = isPlaying ? (data.grade || '—') : 'SS';
+            const grade = (isPlaying && !suppressStats) ? (data.grade || '—') : 'SS';
             if (el.grade.textContent !== grade) {
                 el.grade.textContent = grade;
                 el.grade.className = `grade ${grade}`;
@@ -270,15 +305,13 @@ class LiveModule {
         }
 
         // Hit Counts with slots
-        const hits = data.hitCounts || {};
         if (isPlaying) {
-            if (this.slots.count300) this.slots.count300.setValue(hits.great || 0);
-            if (this.slots.count100) this.slots.count100.setValue(hits.ok || 0);
-            if (this.slots.count50) this.slots.count50.setValue(hits.meh || 0);
-            if (this.slots.countMiss) this.slots.countMiss.setValue(hits.miss || 0);
+            if (this.slots.count300) this.slots.count300.setValue(suppressStats ? 0 : h300);
+            if (this.slots.count100) this.slots.count100.setValue(suppressStats ? 0 : h100);
+            if (this.slots.count50) this.slots.count50.setValue(suppressStats ? 0 : h50);
+            if (this.slots.countMiss) this.slots.countMiss.setValue(suppressStats ? 0 : hMiss);
         } else {
             // Song select: everything should be "the max"
-            // Show total objects as "Great" hits
             if (this.slots.count300) this.slots.count300.setValue(data.totalObjects || 0);
             if (this.slots.count100) this.slots.count100.setValue(0);
             if (this.slots.count50) this.slots.count50.setValue(0);

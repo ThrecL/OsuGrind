@@ -330,8 +330,10 @@ public partial class WebViewWindow : Window
                         playState = snapshot?.PlayState ?? "Idle",
                         currentTime = (snapshot?.TimeMs ?? 0) / 1000.0,
                         totalTime = (snapshot?.TotalTimeMs ?? 0) / 1000.0,
+                        maxCombo = snapshot?.MaxCombo ?? 0,
                         mapMaxCombo = snapshot?.MaxCombo ?? 0,
                         totalObjects = snapshot?.TotalObjects ?? 0,
+
                         backgroundPath = !string.IsNullOrEmpty(snapshot?.BackgroundHash) 
                             ? $"/api/background/{snapshot.BackgroundHash}" 
                             : null,
