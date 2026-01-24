@@ -200,6 +200,41 @@ public class StableScoreDetector
                 bool hChanged = h300 != _lastH300 || h100 != _lastH100 || h50 != _lastH50;
                 bool comboChanged = combo != _lastCombo;
                 bool missesChanged = misses != _lastMisses;
+
+                // FIX: Detect missed Slider Heads (Combo increased but Hits didn't)
+                // If we missed a frame where a slider head was hit, we might see Combo+2 and Hits+1 (Head + End).
+                // We need to inject the intermediate "Head" event.
+                if (comboChanged && !missesChanged && combo > _lastCombo)
+                {
+                    int currentTotalHits = h300 + h100 + h50;
+                    int lastTotalHits = _lastH300 + _lastH100 + _lastH50;
+                    int deltaCombo = combo - _lastCombo;
+                    int deltaHits = currentTotalHits - lastTotalHits;
+
+                    if (deltaHits >= 0)
+                    {
+                        int nonHitSteps = deltaCombo - deltaHits;
+                        int eventsToInject = nonHitSteps;
+                        // If no hits occurred this frame, the final event IS the non-hit event, so don't duplicate it.
+                        if (deltaHits == 0) eventsToInject--;
+
+                        if (eventsToInject > 0)
+                        {
+                            DebugService.Log($"[StableDetector] Injecting {eventsToInject} intermediate slider events. dCombo={deltaCombo}, dHits={deltaHits}", "Detector");
+                            for (int i = 0; i < eventsToInject; i++)
+                            {
+                                int intermediateCombo = _lastCombo + 1 + i;
+                                var stats = new object[] { 
+                                    snapshot.PP ?? 0, snapshot.MaxCombo ?? 0, snapshot.Accuracy ?? 0, 
+                                    _lastH300, _lastH100, _lastH50, _lastMisses,
+                                    snapshot.TimeMs ?? 0, intermediateCombo, 0 
+                                };
+                                _ppTimeline.Add(stats);
+                                _liveTimeline.Add(new object[] { snapshot.TimeMs ?? 0, intermediateCombo, 0 });
+                            }
+                        }
+                    }
+                }
                 
                 // Record whenever stats change. This is the only way to catch slider heads.
                 if (hChanged || comboChanged || missesChanged || _ppTimeline.Count == 0)
