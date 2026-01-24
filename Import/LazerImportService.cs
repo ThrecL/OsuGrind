@@ -231,7 +231,8 @@ public class LazerImportService
                 }
                 catch { }
 
-                string modsString = modsListAcronyms.Count > 0 ? string.Join("", modsListAcronyms) : "NM";
+                string modsString = modsListAcronyms.Count > 0 ? string.Join(",", modsListAcronyms) : "NM";
+
 
                 // Calculate PP via Rosu if we have the file
                 double calculatedPP = s.PP;

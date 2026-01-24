@@ -209,11 +209,8 @@ namespace OsuGrind.LiveReading
                 if (availableModsDict == IntPtr.Zero) return;
 
                 IntPtr entriesArray = _scanner.ReadIntPtr(IntPtr.Add(availableModsDict, 0x10));
-                int count = _scanner.ReadInt32(IntPtr.Add(availableModsDict, 0x38)); // _count (number of elements)
-                DebugLog($"BuildModVTableMap: entriesArray={entriesArray:X}, count={count}");
-                int bucketsCount = _scanner.ReadInt32(IntPtr.Add(availableModsDict, 0x3C)); // _version or something else? 
-                // Wait, in .NET 8, _count is at 0x38, _freeCount at 0x3C? 
-
+                int count = _scanner.ReadInt32(IntPtr.Add(availableModsDict, 0x38)); // _count
+                
                 WriteLog($"BuildModVTableMap: EntriesArray={entriesArray:X}, Count={count}");
 
                 if (entriesArray == IntPtr.Zero || count <= 0 || count > 100)
@@ -225,15 +222,8 @@ namespace OsuGrind.LiveReading
                 for (int i = 0; i < count; i++)
                 {
                     IntPtr entryPtr = IntPtr.Add(entriesArray, 0x10 + i * 0x18);
-
-                    // .NET Dictionary Entry layout (64-bit Core):
-                    // 0x0: value (IReadOnlyList<Mod> pointer)
-                    // 0x8: key (ModType enum/int)
-
                     IntPtr modsListPtr = _scanner.ReadIntPtr(entryPtr);
                     int modType = _scanner.ReadInt32(IntPtr.Add(entryPtr, 0x8));
-
-                    WriteLog($"Entry[{i}] at {entryPtr:X}: modType={modType}, listPtr={modsListPtr:X}");
 
                     if (modsListPtr == IntPtr.Zero) continue;
 
@@ -241,81 +231,42 @@ namespace OsuGrind.LiveReading
                     int listSize = _scanner.ReadInt32(IntPtr.Add(modsListPtr, 0x10));
                     IntPtr itemsArray = _scanner.ReadIntPtr(IntPtr.Add(modsListPtr, 0x8));
 
-                    WriteLog($"Entry[{i}] List: size={listSize}, items={itemsArray:X}");
+                    if (itemsArray == IntPtr.Zero || listSize <= 0 || listSize > 200) continue;
 
-                    if (itemsArray == IntPtr.Zero || listSize <= 0 || listSize > 100) continue;
-
-                    string[]? acronyms = modType switch
-                    {
-                        0 => new[] { "EZ", "NF", "HT", "DC" }, // DifficultyReduction
-                        1 => new[] { "HR", "SD", "PF", "DT", "NC", "HD", "FL", "BL", "ST", "AC", "DA" }, // DifficultyIncrease (DA sometimes here?)
-                        2 => new[] { "TP", "DA", "CL", "RD", "MR", "AL", "SG" }, // Conversion (ModType 2)
-                        3 => new[] { "AT", "CN", "RX", "AP", "SO" }, // Automation (ModType 3)
-                        4 => new[] { "TR", "WG", "SI", "GR", "DF", "WU", "WD", "TC", "BR", "AD", "MU", "NS", "MG", "RP", "AS", "FR", "BU", "SY", "DP", "BM" }, // Fun
-                        5 => new[] { "TD", "SV2" }, // System
-                        _ => null
-                    };
-
-                    if (acronyms == null)
-                    {
-                        WriteLog($"BuildModVTableMap: Unknown ModType {modType} encountered at index {i}");
-                        continue;
-                    }
-
-                    List<IntPtr> flattenedModPtrs = new();
                     for (int j = 0; j < listSize; j++)
                     {
                         IntPtr modPtr = _scanner.ReadIntPtr(IntPtr.Add(itemsArray, 0x10 + j * 8));
                         if (modPtr == IntPtr.Zero) continue;
 
-                        int sig1 = _scanner.ReadInt32(modPtr); // Reading VTable first int (ptr points to vtable)
-                        // Wait, modPtr points to the object. First 8 bytes is vtable ptr.
                         IntPtr vtable = _scanner.ReadIntPtr(modPtr);
                         if (vtable == IntPtr.Zero) continue;
 
-                        // Check MultiMod signature
-                        int s1 = _scanner.ReadInt32(vtable);
-                        int s2 = _scanner.ReadInt32(IntPtr.Add(vtable, 3));
-
-                        if (s1 == 16777216 && s2 == 8193)
+                        if (!_modVTableMap.ContainsKey(vtable))
                         {
-                            IntPtr modsArrayPtr = _scanner.ReadIntPtr(IntPtr.Add(modPtr, 0x10));
-                            if (modsArrayPtr != IntPtr.Zero)
+                            // Try to read acronym directly from Mod instance
+                            // Standard offset for Mod.Acronym string pointer is 0x28
+                            try 
                             {
-                                int nestedSize = _scanner.ReadInt32(IntPtr.Add(modsArrayPtr, 0x8));
-                                if (nestedSize > 0 && nestedSize < 50)
+                                IntPtr acronymStrPtr = _scanner.ReadIntPtr(IntPtr.Add(modPtr, 0x28));
+                                string acr = _scanner.ReadString(acronymStrPtr);
+                                if (!string.IsNullOrEmpty(acr) && acr.Length >= 2 && acr.Length <= 4)
                                 {
-                                    for (int k = 0; k < nestedSize; k++)
+                                    _modVTableMap[vtable] = acr;
+                                    WriteLog($"Mapped VTable {vtable:X} to {acr} (Type: {modType})");
+                                }
+                                else
+                                {
+                                    // Try alternate offset if 0x28 failed
+                                    acronymStrPtr = _scanner.ReadIntPtr(IntPtr.Add(modPtr, 0x30));
+                                    acr = _scanner.ReadString(acronymStrPtr);
+                                    if (!string.IsNullOrEmpty(acr) && acr.Length >= 2 && acr.Length <= 4)
                                     {
-                                        IntPtr nestedModPtr = _scanner.ReadIntPtr(IntPtr.Add(modsArrayPtr, 0x10 + k * 8));
-                                        if (nestedModPtr != IntPtr.Zero) flattenedModPtrs.Add(nestedModPtr);
+                                        _modVTableMap[vtable] = acr;
+                                        WriteLog($"Mapped VTable {vtable:X} to {acr} (Type: {modType}, Offset 0x30)");
                                     }
                                 }
                             }
-                        }
-                        else
-                        {
-                            flattenedModPtrs.Add(modPtr);
-                        }
-                    }
-
-                    WriteLog($"BuildModVTableMap: Type {modType} has {flattenedModPtrs.Count} mods (Expected <= {acronyms.Length})");
-
-                    for (int j = 0; j < flattenedModPtrs.Count; j++)
-                    {
-                        if (j < acronyms.Length)
-                        {
-                            IntPtr vtable = _scanner.ReadIntPtr(flattenedModPtrs[j]);
-                            if (vtable != IntPtr.Zero && !_modVTableMap.ContainsKey(vtable))
-                            {
-                                _modVTableMap[vtable] = acronyms[j];
-                                WriteLog($"Mapped VTable {vtable:X} to {acronyms[j]} (Type: {modType})");
-                            }
-                        }
-                        else
-                        {
-                            IntPtr vtable = _scanner.ReadIntPtr(flattenedModPtrs[j]);
-                            WriteLog($"BuildModVTableMap WARNING: Index {j} exceeds acronyms length {acronyms.Length} for Type {modType}. VTable={vtable:X}");
+                            catch { }
                         }
                     }
                 }
@@ -326,6 +277,7 @@ namespace OsuGrind.LiveReading
                 WriteLog($"Error building mod vtable map: {ex.Message}");
             }
         }
+
 
         private double ReadPerformancePointsFromHUD(IntPtr playerAddress)
         {
@@ -1201,7 +1153,8 @@ namespace OsuGrind.LiveReading
                         }
 
                         snapshot.ModsList = mods;
-                        snapshot.Mods = mods.Count > 0 ? string.Join("", mods) : "NM";
+                        snapshot.Mods = mods.Count > 0 ? string.Join(",", mods) : "NM";
+
                     }
                     // Priority 4: Menu/Other (No specific screen or multiplayer detected)
                     else
@@ -1209,7 +1162,8 @@ namespace OsuGrind.LiveReading
                         snapshot.StateNumber = 0; // Menu/Other
                         var mods = ReadModsFromMemory();
                         snapshot.ModsList = mods;
-                        snapshot.Mods = mods.Count > 0 ? string.Join("", mods) : "NM";
+                        snapshot.Mods = mods.Count > 0 ? string.Join(",", mods) : "NM";
+
                         UpdateStaticAttributesIfNeeded(mods, GetClockRate());
                     }
 
@@ -1536,7 +1490,8 @@ namespace OsuGrind.LiveReading
                 // List<string> modsList = ReadMods(scoreInfoPtr);
                 _currentModsList = modsList;
                 snapshot.ModsList = modsList;
-                snapshot.Mods = modsList.Count > 0 ? string.Join("", modsList) : "NM";
+                snapshot.Mods = modsList.Count > 0 ? string.Join(",", modsList) : "NM";
+
 
                 double clockRate = GetClockRate();
                 uint currentModsBits = GetModsBits(modsList);
@@ -1688,7 +1643,8 @@ namespace OsuGrind.LiveReading
                 // If clock rate is invalid, force 1.0
                 if (clockRate < 0.1 || clockRate > 5.0) clockRate = 1.0;
                 
-                WriteLog($"UpdateResultScreen: Mods={string.Join("", modsList)}, Rate={clockRate}, Path={_currentOsuFilePath}");
+                WriteLog($"UpdateResultScreen: Mods={string.Join(",", modsList)}, Rate={clockRate}, Path={_currentOsuFilePath}");
+
 
                 if (!string.IsNullOrEmpty(_currentOsuFilePath))
                 {
@@ -1738,7 +1694,8 @@ namespace OsuGrind.LiveReading
                 snapshot.Score = objectCount > 0 ? (long)Math.Round(((Math.Pow(objectCount, 2) * 32.57 + 100000) * standardizedScore) / 1000000.0) : standardizedScore;
                 snapshot.Grade = CalculateGrade(snapshot);
                 snapshot.ModsList = modsList;
-                snapshot.Mods = modsList.Count > 0 ? string.Join("", modsList) : "NM";
+                snapshot.Mods = modsList.Count > 0 ? string.Join(",", modsList) : "NM";
+
             }
             catch (Exception ex)
             {
