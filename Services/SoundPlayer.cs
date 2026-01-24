@@ -14,10 +14,11 @@ public sealed class SoundPlayer : IDisposable
 
     public SoundPlayer()
     {
-        // Sounds are in the application's Sounds subfolder
+        // Sounds are in the application's Resources/Sounds subfolder
         var appDir = AppDomain.CurrentDomain.BaseDirectory;
-        soundsFolder = Path.Combine(appDir, "Sounds");
+        soundsFolder = Path.Combine(appDir, "Resources", "Sounds");
     }
+
 
     public void PlayPass()
     {

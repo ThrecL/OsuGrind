@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
 
@@ -11,10 +12,18 @@ public partial class App : System.Windows.Application
 {
     private static Mutex? _mutex;
     private const string MutexName = "OsuGrind_SingleInstance_Mutex_Redux"; // Updated mutex name
+    private const string AppId = "OsuGrind.Analytics.v1";
+
+    [DllImport("shell32.dll", SetLastError = true)]
+    private static extern int SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string appId);
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Set AppUserModelID to unify Taskbar and Volume Mixer entries
+        try { SetCurrentProcessExplicitAppUserModelID(AppId); } catch { }
+
         // Check for existing instance
+
         _mutex = new Mutex(true, MutexName, out bool createdNew);
 
         if (!createdNew)

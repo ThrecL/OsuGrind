@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media.Imaging;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using OsuGrind.Api;
@@ -12,6 +13,7 @@ using System.Text.Json;
 using System.Threading;
 
 namespace OsuGrind;
+
 
 /// <summary>
 /// WebView2-based main window that hosts the HTML UI.
@@ -39,7 +41,19 @@ public partial class WebViewWindow : Window
         ResizeMode = ResizeMode.CanResize;
         Background = System.Windows.Media.Brushes.Black;
 
+        // Set Window Icon
+        try
+        {
+            var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "WebUI", "osugrind_icon.png");
+            if (File.Exists(iconPath))
+            {
+                Icon = new BitmapImage(new Uri(iconPath));
+            }
+        }
+        catch { /* Fallback to default if icon fails to load */ }
+
         // Initialize services
+
         _db = new TrackerDb();
         _soundPlayer = new SoundPlayer();
         _osuReader = new UnifiedOsuReader(_db, _soundPlayer);
@@ -181,12 +195,20 @@ public partial class WebViewWindow : Window
             );
             Directory.CreateDirectory(userDataFolder);
 
-            var options = new CoreWebView2EnvironmentOptions("--remote-debugging-port=9222");
+            // Optimization: Disable unused features and limit cache to reduce AppData footprint
+            var browserArgs = "--remote-debugging-port=9222 " +
+                              "--disable-features=Translate,InterestFeedContentSuggestions,LiveCaption,OptimizationHints,ContextualSearch " +
+                              "--disk-cache-size=52428800 " +
+                              "--disable-component-update " +
+                              "--mute-audio=false";
+
+            var options = new CoreWebView2EnvironmentOptions(browserArgs);
             var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
             await _webView.EnsureCoreWebView2Async(env);
 
-            var skinsRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "rewind", "Skins");
+            var skinsRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Skins");
             Directory.CreateDirectory(skinsRoot);
+
             _webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 "osugrind-skins.local",
                 skinsRoot,

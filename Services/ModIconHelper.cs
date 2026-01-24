@@ -123,7 +123,8 @@ public static class ModIconHelper
     {
         if (ModFileNames.TryGetValue(acronym.ToUpperInvariant(), out var fileName))
         {
-            var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "Mods", fileName);
+            var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Assets", "Mods", fileName);
+
             return File.Exists(path) ? path : null;
         }
         return null;

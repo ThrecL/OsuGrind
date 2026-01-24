@@ -28,9 +28,39 @@ namespace OsuGrind.LiveReading
         private readonly StableScoreDetector _detector;
         private DateTime _lastConnectionAttempt = DateTime.MinValue;
 
+        private int _lastState = -1;
         private int _liveTrackedMaxCombo = 0;
         private bool _hasSeenHealth = false;
-        private int _lastState = -1;
+        private IntPtr _lastBeatmapPtr = IntPtr.Zero;
+        private uint _lastModsBits = 0xFFFFFFFF;
+        private string? _lastMD5Hash;
+        private CachedStats? _cachedStats;
+
+        private class CachedStats
+        {
+            public string? Artist;
+            public string? Title;
+            public string? Version;
+            public string? Beatmap;
+            public string? MD5Hash;
+            public string? OsuFolder;
+            public string? MapPath;
+            public string? BackgroundPath;
+            public string? BackgroundHash;
+            
+            public List<string> ModsList = new();
+            public string Mods = "NM";
+            public uint ModsBits;
+
+            public float AR, CS, OD, HP;
+            public double Stars;
+            public double PPIfFC;
+            public int MostlyBPM, BPM;
+            public int MapMaxCombo;
+            public long MaxScore;
+            public int TotalObjects;
+            public int TotalTimeMs;
+        }
 
         public bool IsConnected => _process != null && !_process.HasExited && _baseAddress != IntPtr.Zero;
         public bool IsScanning { get; private set; }
@@ -132,123 +162,165 @@ namespace OsuGrind.LiveReading
                     if (flagPtr != IntPtr.Zero) snapshot.IsReplay = _scanner.ReadByte(flagPtr) == 1;
                 }
 
-                // Beatmap
-                IntPtr beatmapPtrAddr = _scanner!.ReadIntPtr(IntPtr.Add(_baseAddress, -12));
-                IntPtr beatmapPtr = _scanner!.ReadIntPtr(beatmapPtrAddr);
-
-                if (beatmapPtr != IntPtr.Zero)
-                {
-                    snapshot.Artist = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x18)));
-                    snapshot.Title = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x24)));
-                    snapshot.Version = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0xAC)));
-                    snapshot.Beatmap = $"{snapshot.Artist} - {snapshot.Title} [{snapshot.Version}]";
-                    snapshot.MD5Hash = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x6C)));
-
-                    string stablePath = SettingsManager.Current.StablePath ?? "";
-                    if (string.IsNullOrEmpty(stablePath))
+                    // 1. Resolve Beatmap Pointer (Throttled during gameplay)
+                    IntPtr beatmapPtr = IntPtr.Zero;
+                    if (snapshot.StateNumber != 2 || _lastBeatmapPtr == IntPtr.Zero)
                     {
-                        try { 
-                            if (_process != null && _process.MainModule != null)
-                                stablePath = Path.GetDirectoryName(_process.MainModule.FileName) ?? ""; 
-                        } catch { }
+                        IntPtr beatmapPtrAddr = _scanner!.ReadIntPtr(IntPtr.Add(_baseAddress, -12));
+                        beatmapPtr = _scanner!.ReadIntPtr(beatmapPtrAddr);
                     }
-                    if (!string.IsNullOrEmpty(stablePath)) snapshot.OsuFolder = stablePath;
-
-                    string folder = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x78)));
-                    string filename = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x90)));
-                    string background = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x68)));
-
-                    if (!string.IsNullOrEmpty(stablePath) && !string.IsNullOrEmpty(folder) && !string.IsNullOrEmpty(filename))
+                    else
                     {
-                        string fullPath = Path.Combine(stablePath, "Songs", folder, filename);
-                        if (File.Exists(fullPath))
-                        {
-                            if (fullPath != _currentOsuFilePath) { 
-                                _currentOsuFilePath = fullPath; 
-                                _rosuService.UpdateContext(fullPath); 
-                            }
-                            snapshot.MapPath = fullPath;
-                            string bgPath = Path.Combine(stablePath, "Songs", folder, background);
-                            if (File.Exists(bgPath)) 
-                            {
-                                snapshot.BackgroundPath = bgPath;
-                                snapshot.BackgroundHash = "STABLE:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(bgPath));
-                            }
-                        }
+                        beatmapPtr = _lastBeatmapPtr;
                     }
-                    else snapshot.MapPath = _currentOsuFilePath;
 
-                    // Mods
-                    uint modsBits = 0;
-                    bool playingModsFound = false;
-
-                    if (snapshot.StateNumber == 2 || snapshot.StateNumber == 7)
+                    if (beatmapPtr != IntPtr.Zero)
                     {
-                        try
-                        {
-                            IntPtr rulesetPtr = _scanner!.ReadIntPtr(_rulesetsAddr);
-                            IntPtr rulesetAddr = _scanner!.ReadIntPtr(IntPtr.Add(rulesetPtr, 4));
-                            if (rulesetAddr != IntPtr.Zero)
-                            {
-                                IntPtr playDataBase = IntPtr.Zero;
-                                if (snapshot.StateNumber == 7) playDataBase = _scanner.ReadIntPtr(IntPtr.Add(rulesetAddr, 0x38));
-                                else {
-                                    IntPtr gameplayBase = _scanner.ReadIntPtr(IntPtr.Add(rulesetAddr, 104));
-                                    if (gameplayBase != IntPtr.Zero) playDataBase = _scanner.ReadIntPtr(IntPtr.Add(gameplayBase, 56));
-                                }
+                        bool mapChanged = beatmapPtr != _lastBeatmapPtr;
+                        _lastBeatmapPtr = beatmapPtr;
 
-                                if (playDataBase != IntPtr.Zero)
+                        if (mapChanged || _cachedStats == null)
+                        {
+                            _cachedStats = new CachedStats
+                            {
+                                Artist = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x18))),
+                                Title = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x24))),
+                                Version = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0xAC))),
+                                MD5Hash = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x6C)))
+                            };
+                            _cachedStats.Beatmap = $"{_cachedStats.Artist} - {_cachedStats.Title} [{_cachedStats.Version}]";
+
+                            string stablePath = SettingsManager.Current.StablePath ?? "";
+                            if (string.IsNullOrEmpty(stablePath))
+                            {
+                                try { 
+                                    if (_process != null && _process.MainModule != null)
+                                        stablePath = Path.GetDirectoryName(_process.MainModule.FileName) ?? ""; 
+                                } catch { }
+                            }
+                            _cachedStats.OsuFolder = stablePath;
+
+                            string folder = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x78)));
+                            string filename = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x90)));
+                            string background = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x68)));
+
+                            if (!string.IsNullOrEmpty(stablePath) && !string.IsNullOrEmpty(folder) && !string.IsNullOrEmpty(filename))
+                            {
+                                string fullPath = Path.Combine(stablePath, "Songs", folder, filename);
+                                if (File.Exists(fullPath))
                                 {
-                                    IntPtr modsClassPtr = _scanner.ReadIntPtr(IntPtr.Add(playDataBase, 0x1C));
-                                    if (modsClassPtr != IntPtr.Zero)
+                                    _cachedStats.MapPath = fullPath;
+                                    string bgPath = Path.Combine(stablePath, "Songs", folder, background);
+                                    if (File.Exists(bgPath)) 
                                     {
-                                        int val1 = _scanner.ReadInt32(IntPtr.Add(modsClassPtr, 0x08));
-                                        int val2 = _scanner.ReadInt32(IntPtr.Add(modsClassPtr, 0x0C));
-                                        modsBits = (uint)(val1 ^ val2);
-                                        playingModsFound = true;
+                                        _cachedStats.BackgroundPath = bgPath;
+                                        _cachedStats.BackgroundHash = "STABLE:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(bgPath));
                                     }
                                 }
                             }
-                        } catch { }
-                    }
+                            
+                            if (_cachedStats.MapPath != _currentOsuFilePath && !string.IsNullOrEmpty(_cachedStats.MapPath))
+                            {
+                                _currentOsuFilePath = _cachedStats.MapPath;
+                                _rosuService.UpdateContext(_cachedStats.MapPath);
+                            }
+                        }
 
-                    if (!playingModsFound && _menuModsPtr != IntPtr.Zero)
-                    {
-                        IntPtr modsAddr = _scanner.ReadIntPtr(_menuModsPtr);
-                        if (modsAddr != IntPtr.Zero) modsBits = (uint)_scanner.ReadInt32(modsAddr);
-                    }
+                        // Apply cached metadata
+                        snapshot.Artist = _cachedStats!.Artist;
+                        snapshot.Title = _cachedStats.Title;
+                        snapshot.Version = _cachedStats.Version;
+                        snapshot.Beatmap = _cachedStats.Beatmap;
+                        snapshot.MD5Hash = _cachedStats.MD5Hash;
+                        snapshot.OsuFolder = _cachedStats.OsuFolder;
+                        snapshot.MapPath = _cachedStats.MapPath;
+                        snapshot.BackgroundPath = _cachedStats.BackgroundPath;
+                        snapshot.BackgroundHash = _cachedStats.BackgroundHash;
 
-                    snapshot.ModsList = ParseMods(modsBits, true);
-                    snapshot.Mods = string.Join(",", snapshot.ModsList);
+                        // 2. Mods (Throttled by bits)
+                        uint modsBits = 0;
+                        bool playingModsFound = false;
 
+                        if (snapshot.StateNumber == 2 || snapshot.StateNumber == 7)
+                        {
+                            try
+                            {
+                                IntPtr rulesetPtr = _scanner!.ReadIntPtr(_rulesetsAddr);
+                                IntPtr rulesetAddr = _scanner!.ReadIntPtr(IntPtr.Add(rulesetPtr, 4));
+                                if (rulesetAddr != IntPtr.Zero)
+                                {
+                                    IntPtr playDataBase = IntPtr.Zero;
+                                    if (snapshot.StateNumber == 7) playDataBase = _scanner.ReadIntPtr(IntPtr.Add(rulesetAddr, 0x38));
+                                    else {
+                                        IntPtr gameplayBase = _scanner.ReadIntPtr(IntPtr.Add(rulesetAddr, 104));
+                                        if (gameplayBase != IntPtr.Zero) playDataBase = _scanner.ReadIntPtr(IntPtr.Add(gameplayBase, 56));
+                                    }
 
-                    if (_rosuService != null && _rosuService.IsLoaded)
-                    {
-                        uint rosuMods = RosuService.ModsToRosuStats(snapshot.ModsList);
-                        double clockRate = RosuService.GetClockRateFromMods(rosuMods);
-                        var attrs = _rosuService.GetDifficultyAttributes(rosuMods, clockRate);
-                        snapshot.AR = attrs.AR; snapshot.CS = attrs.CS; snapshot.OD = attrs.OD; snapshot.HP = attrs.HP;
-                        snapshot.Stars = _rosuService.GetStars(rosuMods, 0, clockRate);
-                        var ppFcRes = _rosuService.CalculatePpIfFc(_currentOsuFilePath ?? "", snapshot.ModsList, 100.0, -1, -1, -1, -1, clockRate);
-                        snapshot.PPIfFC = ppFcRes.PP;
-                        snapshot.MostlyBPM = (int)Math.Round(_rosuService.BaseBpm * clockRate);
-                        snapshot.BPM = snapshot.MostlyBPM;
-                        snapshot.MapMaxCombo = ppFcRes.MaxCombo;
-                        snapshot.MaxScore = _rosuService.CalculateStableMaxScore(_currentOsuFilePath ?? "", snapshot.ModsList, snapshot.MapMaxCombo, clockRate);
-                        snapshot.TotalObjects = _rosuService.TotalObjects; 
-                        if (ppFcRes.MapLength > 0) snapshot.TotalTimeMs = (int)(ppFcRes.MapLength / clockRate);
+                                    if (playDataBase != IntPtr.Zero)
+                                    {
+                                        IntPtr modsClassPtr = _scanner.ReadIntPtr(IntPtr.Add(playDataBase, 0x1C));
+                                        if (modsClassPtr != IntPtr.Zero)
+                                        {
+                                            int val1 = _scanner.ReadInt32(IntPtr.Add(modsClassPtr, 0x08));
+                                            int val2 = _scanner.ReadInt32(IntPtr.Add(modsClassPtr, 0x0C));
+                                            modsBits = (uint)(val1 ^ val2);
+                                            playingModsFound = true;
+                                        }
+                                    }
+                                }
+                            } catch { }
+                        }
+
+                        if (!playingModsFound && _menuModsPtr != IntPtr.Zero)
+                        {
+                            IntPtr modsAddr = _scanner.ReadIntPtr(_menuModsPtr);
+                            if (modsAddr != IntPtr.Zero) modsBits = (uint)_scanner.ReadInt32(modsAddr);
+                        }
+
+                        if (modsBits != _lastModsBits || mapChanged)
+                        {
+                            _lastModsBits = modsBits;
+                            _cachedStats.ModsList = ParseMods(modsBits, true);
+                            _cachedStats.Mods = string.Join(",", _cachedStats.ModsList);
+                            _cachedStats.ModsBits = modsBits;
+
+                            // 3. Performance (Recalculate only on map/mod change)
+                            if (_rosuService != null && _rosuService.IsLoaded && !string.IsNullOrEmpty(_currentOsuFilePath))
+                            {
+                                uint rosuMods = RosuService.ModsToRosuStats(_cachedStats.ModsList);
+                                double clockRate = RosuService.GetClockRateFromMods(rosuMods);
+                                var attrs = _rosuService.GetDifficultyAttributes(rosuMods, clockRate);
+                                _cachedStats.AR = (float)attrs.AR; _cachedStats.CS = (float)attrs.CS; _cachedStats.OD = (float)attrs.OD; _cachedStats.HP = (float)attrs.HP;
+                                _cachedStats.Stars = _rosuService.GetStars(rosuMods, 0, clockRate);
+                                var ppFcRes = _rosuService.CalculatePpIfFc(_currentOsuFilePath, _cachedStats.ModsList, 100.0, -1, -1, -1, -1, clockRate);
+                                _cachedStats.PPIfFC = ppFcRes.PP;
+                                _cachedStats.MostlyBPM = (int)Math.Round(_rosuService.BaseBpm * clockRate);
+                                _cachedStats.BPM = _cachedStats.MostlyBPM;
+                                _cachedStats.MapMaxCombo = ppFcRes.MaxCombo;
+                                _cachedStats.MaxScore = _rosuService.CalculateStableMaxScore(_currentOsuFilePath, _cachedStats.ModsList, _cachedStats.MapMaxCombo, clockRate);
+                                _cachedStats.TotalObjects = _rosuService.TotalObjects; 
+                                if (ppFcRes.MapLength > 0) _cachedStats.TotalTimeMs = (int)(ppFcRes.MapLength / clockRate);
+                            }
+                        }
+
+                        snapshot.ModsList = _cachedStats.ModsList;
+                        snapshot.Mods = _cachedStats.Mods;
+                        snapshot.AR = _cachedStats.AR; snapshot.CS = _cachedStats.CS; snapshot.OD = _cachedStats.OD; snapshot.HP = _cachedStats.HP;
+                        snapshot.Stars = _cachedStats.Stars; snapshot.PPIfFC = _cachedStats.PPIfFC;
+                        snapshot.MostlyBPM = _cachedStats.MostlyBPM; snapshot.BPM = _cachedStats.BPM;
+                        snapshot.MapMaxCombo = _cachedStats.MapMaxCombo; snapshot.MaxScore = _cachedStats.MaxScore;
+                        snapshot.TotalObjects = _cachedStats.TotalObjects; snapshot.TotalTimeMs = _cachedStats.TotalTimeMs;
 
                         if (snapshot.StateNumber == 5 || snapshot.StateNumber == 0)
                         {
                             snapshot.IsPreview = true;
-                            snapshot.PP = ppFcRes.PP; snapshot.Combo = ppFcRes.MaxCombo; snapshot.MaxCombo = ppFcRes.MaxCombo;
+                            snapshot.PP = snapshot.PPIfFC; snapshot.Combo = snapshot.MapMaxCombo; snapshot.MaxCombo = snapshot.MapMaxCombo;
                             snapshot.Score = snapshot.MaxScore; snapshot.Accuracy = 1.0;
-                            snapshot.HitCounts = new HitCounts(_rosuService.TotalObjects, 0, 0, 0);
+                            snapshot.HitCounts = new HitCounts(snapshot.TotalObjects ?? 0, 0, 0, 0);
                             snapshot.Grade = snapshot.ModsList.Contains("HD") || snapshot.ModsList.Contains("FL") ? "SSH" : "SS";
                             snapshot.TimeMs = snapshot.TotalTimeMs;
                         }
                     }
-                }
 
                 if (snapshot.StateNumber == 2 || snapshot.StateNumber == 7) // Playing or Results
                 {

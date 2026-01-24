@@ -256,8 +256,9 @@ namespace OsuGrind.Services
                     var folderName = $"{artist} - {title} ({beatmapHash.Substring(0, 8)})";
                     folderName = string.Join("_", folderName.Split(Path.GetInvalidFileNameChars()));
                     
-                    string exportDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "rewind", "Songs", folderName);
+                    string exportDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Songs", folderName);
                     Directory.CreateDirectory(exportDir);
+
 
                     Log($"Found map! Exporting to {exportDir}");
 
@@ -325,8 +326,9 @@ namespace OsuGrind.Services
                 if (!File.Exists(realmPath)) return null;
 
                 string tempRealm = Path.Combine(Path.GetTempPath(), $"client_search_temp_{Guid.NewGuid()}.realm");
-                string replaysDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Replays");
+                string replaysDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Replays");
                 Directory.CreateDirectory(replaysDir);
+
 
                 try
                 {
@@ -546,9 +548,10 @@ namespace OsuGrind.Services
                                 // Verify if it's an .osr file (header check or extension)
                                 if (file.Extension.Equals(".osr", StringComparison.OrdinalIgnoreCase) || file.Name.Length > 30) // weak heuristic
                                 {
-                                     string replaysDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Replays");
+                                     string replaysDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Replays");
                                      Directory.CreateDirectory(replaysDir);
                                      string destFile = Path.Combine(replaysDir, $"OnDemand_Loose_{new DateTimeOffset(file.LastWriteTime).ToUnixTimeSeconds()}.osr");
+
                                      File.Copy(file.FullName, destFile, true);
                                      Log($"Found loose replay match: {file.FullName}");
                                      return destFile;

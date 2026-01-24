@@ -37,9 +37,10 @@ namespace OsuGrind.Services
             try
             {
                 string dllName = "rosu_pp_wrapper";
-                string localPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lib", "rosu_pp_wrapper.dll");
+                string localPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "lib", "rosu_pp_wrapper.dll");
                 
                 if (File.Exists(localPath))
+
                 {
                     NativeLibrary.Load(localPath);
                 }

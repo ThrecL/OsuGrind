@@ -29,9 +29,9 @@ public static class Offsets
             {
                 var possiblePaths = new[]
                 {
-                    Path.Combine(basePath ?? AppDomain.CurrentDomain.BaseDirectory, "LiveReading", "offsets.json"),
+                    Path.Combine(basePath ?? AppDomain.CurrentDomain.BaseDirectory, "Resources", "LiveReading", "offsets.json"),
                     Path.Combine(basePath ?? AppDomain.CurrentDomain.BaseDirectory, "offsets.json"),
-                    "LiveReading/offsets.json",
+                    "Resources/LiveReading/offsets.json",
                     "offsets.json"
                 };
 
@@ -53,7 +53,7 @@ public static class Offsets
                         return;
                     }
                 }
-                _offsetsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "LiveReading", "offsets.json");
+                _offsetsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "LiveReading", "offsets.json");
                 Task.Run(async () => await FetchFromTosuAsync()).Wait(10000);
             }
             catch (Exception ex) { DebugService.Log($"Error loading offsets: {ex.Message}", "Offsets"); }
@@ -110,7 +110,7 @@ public static class Offsets
             using var client = new HttpClient();
             var json = await client.GetStringAsync(TosuOffsetsUrl);
             lock (_lock) { ParseOffsets(json); }
-            _offsetsFilePath ??= Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "LiveReading", "offsets.json");
+            _offsetsFilePath ??= Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "LiveReading", "offsets.json");
             var dir = Path.GetDirectoryName(_offsetsFilePath);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             await File.WriteAllTextAsync(_offsetsFilePath, json);

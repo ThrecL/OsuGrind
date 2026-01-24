@@ -610,11 +610,29 @@ class HistoryModule {
                         this.heatmapRenderer = new HeatmapRenderer(heatmapContainer);
                         this.heatmapRenderer.start();
                         
+                        // Audio Store Shim to prevent crashes
+                        const win = rewindFrame.contentWindow;
+                        if (!win.__SKIN_AUDIO_STORE) {
+                            // Define a setter/getter or just a plain object that can be overridden
+                            Object.defineProperty(win, '__SKIN_AUDIO_STORE', {
+                                configurable: true,
+                                enumerable: true,
+                                writable: true,
+                                value: {
+                                    setVolume: () => {},
+                                    play: () => {},
+                                    load: () => {}
+                                }
+                            });
+                            console.log('[Rewind] Audio shim injected (configurable)');
+                        }
+
                         console.log('[Rewind] Transparency styles and heatmap initialized');
                     } catch (e) {
                         console.warn('[Rewind] Could not inject styles:', e);
                     }
                 };
+
             }
             if (statusOverlay) {
                 statusOverlay.style.opacity = '0';
