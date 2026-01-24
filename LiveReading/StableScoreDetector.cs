@@ -18,6 +18,7 @@ public class StableScoreDetector
     
     private List<object[]> _liveTimeline = new();
     private List<object[]> _ppTimeline = new(); // Format: [pp, maxC, acc, c300, c100, c50, miss, timeMs, currentCombo, eventType]
+    private List<int> _pendingHitIndices = new(); // Indices in _ppTimeline waiting for a hit result (slider heads/ticks)
     private int _lastCombo;
     private int _lastMisses;
     private int _lastH300, _lastH100, _lastH50;
@@ -77,6 +78,7 @@ public class StableScoreDetector
                     _playStartTime = now; 
                     _liveTimeline.Clear();
                     _ppTimeline.Clear();
+                    _pendingHitIndices.Clear();
                     _lastCombo = 0;
                     _lastMisses = 0;
                     _lastH300 = 0; _lastH100 = 0; _lastH50 = 0;
@@ -224,12 +226,14 @@ public class StableScoreDetector
                             for (int i = 0; i < eventsToInject; i++)
                             {
                                 int intermediateCombo = _lastCombo + 1 + i;
+                                int injectedIdx = _ppTimeline.Count;
                                 var stats = new object[] { 
                                     snapshot.PP ?? 0, snapshot.MaxCombo ?? 0, snapshot.Accuracy ?? 0, 
                                     _lastH300, _lastH100, _lastH50, _lastMisses,
                                     snapshot.TimeMs ?? 0, intermediateCombo, 0 
                                 };
                                 _ppTimeline.Add(stats);
+                                _pendingHitIndices.Add(injectedIdx);
                                 _liveTimeline.Add(new object[] { snapshot.TimeMs ?? 0, intermediateCombo, 0 });
                             }
                         }
@@ -239,9 +243,31 @@ public class StableScoreDetector
                 // Record whenever stats change. This is the only way to catch slider heads.
                 if (hChanged || comboChanged || missesChanged || _ppTimeline.Count == 0)
                 {
-                    _lastH300 = h300; _lastH100 = h100; _lastH50 = h50;
-
                     int eventType = missesChanged ? 1 : (combo < _lastCombo && !missesChanged ? 2 : 0);
+                    
+                    // HIT SHIFTING LOGIC
+                    // 1. Determine if this current event should be shifted later (Head, Tick, Repeat)
+                    bool isPending = comboChanged && !hChanged && !missesChanged && combo > _lastCombo;
+                    
+                    // 2. If hits increased (or we missed), and we have pending slider parts, 
+                    // shift the hit back to ALL pending indices for this object.
+                    if ((hChanged || missesChanged) && _pendingHitIndices.Count > 0)
+                    {
+                        foreach (int idx in _pendingHitIndices)
+                        {
+                            var entry = _ppTimeline[idx];
+                            // Shift judgment results (Hits, PP, Acc) back to the head/ticks
+                            entry[0] = snapshot.PP ?? (double)entry[0];
+                            entry[2] = snapshot.Accuracy ?? (double)entry[2];
+                            entry[3] = h300;
+                            entry[4] = h100;
+                            entry[5] = h50;
+                            entry[6] = misses;
+                        }
+                        _pendingHitIndices.Clear();
+                    }
+
+                    _lastH300 = h300; _lastH100 = h100; _lastH50 = h50;
 
                     var stats = new object[] { 
                         snapshot.PP ?? 0,           // 0: PP
@@ -256,7 +282,9 @@ public class StableScoreDetector
                         eventType                   // 9: EventType
                     };
 
+                    int statsIdx = _ppTimeline.Count;
                     _ppTimeline.Add(stats);
+                    if (isPending) _pendingHitIndices.Add(statsIdx);
                     
                     if (comboChanged || missesChanged)
                     {

@@ -89,17 +89,11 @@ class OsuGrindApp {
                             const entryCombo = entry[8] || 0;
 
                             // Sync Logic:
-                            // We want the entry that matches Rewind's HITS count.
-                            // If there are multiple entries with the same hit count (e.g. slider heads/ticks),
-                            // we pick the one that matches Rewind's current COMBO.
-                            if (entryHits < targetHits) {
+                            // We want the entry that is at or before Rewind's state in both Hits and Combo.
+                            // This prevents jumping to a slider end/tick if the playback hasn't reached it.
+                            if (entryHits <= targetHits && entryCombo <= rewindCombo) {
                                 bestIdx = i;
                                 break;
-                            } else if (entryHits === targetHits) {
-                                if (entryCombo <= rewindCombo) {
-                                    bestIdx = i;
-                                    break;
-                                }
                             }
                         }
 

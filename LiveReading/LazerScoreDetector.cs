@@ -24,6 +24,7 @@ public class LazerScoreDetector
     private int _lastCombo;
     private int _lastMisses;
     private int _lastH300, _lastH100, _lastH50;
+    private int _lastSliderTail, _lastSmallTick, _lastLargeTick;
     private List<object[]> _liveTimeline = new(); // List of [time, combo, eventType]
     private List<object[]> _ppTimeline = new(); // Format: [pp, combo, acc, c300, c100, c50, miss, timeMs, currentCombo, eventType]
     public LiveSnapshot? LastSnapshot { get; private set; }
@@ -54,6 +55,7 @@ public class LazerScoreDetector
                     _liveTimeline.Clear();
                     _ppTimeline.Clear();
                     _lastCombo = 0; _lastMisses = 0; _lastH300 = 0; _lastH100 = 0; _lastH50 = 0;
+                    _lastSliderTail = 0; _lastSmallTick = 0; _lastLargeTick = 0;
                 }
             }
 
@@ -75,7 +77,7 @@ public class LazerScoreDetector
                     _liveTimeline.Clear();
                     _ppTimeline.Clear();
                     _lastCombo = 0; _lastMisses = 0; _lastH300 = 0; _lastH100 = 0; _lastH50 = 0;
-                    _ppTimeline.Add(new object[] { 0.0, 0, 1.0, 0, 0, 0, 0, 0, 0, 0 });
+                    _lastSliderTail = 0; _lastSmallTick = 0; _lastLargeTick = 0;
                     DebugService.Log($"[LazerDetector] Play Started. IsReplay={_isReplaySession}", "Detector");
                 }
                 _stateBeforeLast = _prevState; _prevState = _lastState; _lastState = snapshot.StateNumber; _lastStateChangeTime = now;
@@ -105,13 +107,18 @@ public class LazerScoreDetector
                 int h300 = snapshot.HitCounts?.Count300 ?? 0;
                 int h100 = snapshot.HitCounts?.Count100 ?? 0;
                 int h50 = snapshot.HitCounts?.Count50 ?? 0;
+                int sliderTail = snapshot.HitCounts?.SliderTailHit ?? 0;
+                int smallTick = snapshot.HitCounts?.SmallTickHit ?? 0;
+                int largeTick = snapshot.HitCounts?.LargeTickHit ?? 0;
 
                 bool hChanged = h300 != _lastH300 || h100 != _lastH100 || h50 != _lastH50;
-                bool statsChanged = combo != _lastCombo || misses != _lastMisses || hChanged || _ppTimeline.Count == 0;
+                bool sliderChanged = sliderTail != _lastSliderTail || smallTick != _lastSmallTick || largeTick != _lastLargeTick;
+                bool statsChanged = combo != _lastCombo || misses != _lastMisses || hChanged || sliderChanged || _ppTimeline.Count == 0;
 
                 if (statsChanged)
                 {
                     _lastH300 = h300; _lastH100 = h100; _lastH50 = h50;
+                    _lastSliderTail = sliderTail; _lastSmallTick = smallTick; _lastLargeTick = largeTick;
                     int eventType = (misses > _lastMisses) ? 1 : (combo < _lastCombo && misses == _lastMisses ? 2 : 0);
 
                     var stats = new object[] { 
