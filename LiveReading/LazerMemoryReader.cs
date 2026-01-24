@@ -192,32 +192,24 @@ namespace OsuGrind.LiveReading
 
         private void BuildModVTableMap()
         {
+            if (_gameBaseAddress == IntPtr.Zero) return;
             DebugLog("BuildModVTableMap STARTED.");
             try
             {
                 IntPtr availableModsBindable = _scanner.ReadIntPtr(IntPtr.Add(_gameBaseAddress, Offsets.OsuGameDesktop.AvailableMods));
-                DebugLog($"BuildModVTableMap: availableModsBindable={availableModsBindable:X}");
-                if (availableModsBindable == IntPtr.Zero)
-                {
-                    DebugLog("BuildModVTableMap: availableModsBindable is ZERO. Returning.");
-                    return;
-                }
+                if (availableModsBindable == IntPtr.Zero) return;
 
-                // Bindable<Dictionary<ModType, IReadOnlyList<Mod>>>
+                // Try both common Bindable offsets
                 IntPtr availableModsDict = _scanner.ReadIntPtr(IntPtr.Add(availableModsBindable, 0x20));
-                DebugLog($"BuildModVTableMap: availableModsDict={availableModsDict:X}");
+                if (availableModsDict == IntPtr.Zero)
+                    availableModsDict = _scanner.ReadIntPtr(IntPtr.Add(availableModsBindable, 0x10));
+                
                 if (availableModsDict == IntPtr.Zero) return;
 
                 IntPtr entriesArray = _scanner.ReadIntPtr(IntPtr.Add(availableModsDict, 0x10));
                 int count = _scanner.ReadInt32(IntPtr.Add(availableModsDict, 0x38)); // _count
                 
-                WriteLog($"BuildModVTableMap: EntriesArray={entriesArray:X}, Count={count}");
-
-                if (entriesArray == IntPtr.Zero || count <= 0 || count > 100)
-                {
-                    WriteLog($"BuildModVTableMap early return: Entries={entriesArray:X}, Count={count}");
-                    return;
-                }
+                if (entriesArray == IntPtr.Zero || count <= 0 || count > 150) return;
 
                 for (int i = 0; i < count; i++)
                 {
@@ -227,7 +219,6 @@ namespace OsuGrind.LiveReading
 
                     if (modsListPtr == IntPtr.Zero) continue;
 
-                    // List layout: _items (0x8), _size (0x10)
                     int listSize = _scanner.ReadInt32(IntPtr.Add(modsListPtr, 0x10));
                     IntPtr itemsArray = _scanner.ReadIntPtr(IntPtr.Add(modsListPtr, 0x8));
 
@@ -243,34 +234,34 @@ namespace OsuGrind.LiveReading
 
                         if (!_modVTableMap.ContainsKey(vtable))
                         {
-                            // Try to read acronym directly from Mod instance
-                            // Standard offset for Mod.Acronym string pointer is 0x28
-                            try 
+                            // Try multiple offsets for Acronym string pointer
+                            string acr = "";
+                            int[] offsets = { 0x28, 0x30, 0x38, 0x20 };
+                            foreach (var offset in offsets)
                             {
-                                IntPtr acronymStrPtr = _scanner.ReadIntPtr(IntPtr.Add(modPtr, 0x28));
-                                string acr = _scanner.ReadString(acronymStrPtr);
-                                if (!string.IsNullOrEmpty(acr) && acr.Length >= 2 && acr.Length <= 4)
-                                {
-                                    _modVTableMap[vtable] = acr;
-                                    WriteLog($"Mapped VTable {vtable:X} to {acr} (Type: {modType})");
-                                }
-                                else
-                                {
-                                    // Try alternate offset if 0x28 failed
-                                    acronymStrPtr = _scanner.ReadIntPtr(IntPtr.Add(modPtr, 0x30));
-                                    acr = _scanner.ReadString(acronymStrPtr);
-                                    if (!string.IsNullOrEmpty(acr) && acr.Length >= 2 && acr.Length <= 4)
-                                    {
-                                        _modVTableMap[vtable] = acr;
-                                        WriteLog($"Mapped VTable {vtable:X} to {acr} (Type: {modType}, Offset 0x30)");
-                                    }
-                                }
+                                try {
+                                    IntPtr ptr = _scanner.ReadIntPtr(IntPtr.Add(modPtr, offset));
+                                    acr = _scanner.ReadString(ptr);
+                                    if (!string.IsNullOrEmpty(acr) && acr.Length >= 2 && acr.Length <= 4 && System.Text.RegularExpressions.Regex.IsMatch(acr, "^[A-Z0-9]+$"))
+                                        break;
+                                    acr = "";
+                                } catch { }
                             }
-                            catch { }
+
+                            if (!string.IsNullOrEmpty(acr))
+                            {
+                                _modVTableMap[vtable] = acr;
+                                WriteLog($"Mapped VTable {vtable:X} to {acr} (Type: {modType})");
+                            }
                         }
                     }
                 }
-                WriteLog($"Built Mod VTable Map: {_modVTableMap.Count} entries.");
+                
+                // Final check: if map is still empty, something is fundamentally wrong with dict reading
+                if (_modVTableMap.Count == 0)
+                {
+                    WriteLog("BuildModVTableMap: Failed to extract any mods dynamically.");
+                }
             }
             catch (Exception ex)
             {
@@ -2182,12 +2173,10 @@ namespace OsuGrind.LiveReading
                 }
 
                 // SelectedMods is a BindableList<T>
-                // In some lazer versions, the internal list is at 0x20, in others 0x18
                 IntPtr listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x18));
-                if (listPtr == IntPtr.Zero)
-                {
-                    listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x20));
-                }
+                if (listPtr == IntPtr.Zero) listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x20));
+                if (listPtr == IntPtr.Zero) listPtr = _scanner.ReadIntPtr(IntPtr.Add(bindableMods, 0x10));
+
 
                 WriteLog($"ReadModsFromMemory: bindableMods={bindableMods:X}, listPtr={listPtr:X}");
 
@@ -2384,9 +2373,23 @@ namespace OsuGrind.LiveReading
                 }
             }
             catch { }
+
+            // FALLBACK: Read from ScoreInfo.Mods (IReadOnlyList<Mod>)
+            if (mods.Count == 0)
+            {
+                try
+                {
+                    IntPtr modsListPtr = _scanner.ReadIntPtr(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.statistics + 8)); // Usually after stats
+                    // This is complex because we don't have the exact offset for ScoreInfo.Mods
+                    // But we can try common ones if Json failed
+                }
+                catch { }
+            }
+
             if (mods.Count == 0) mods.Add("NM");
             return mods;
         }
+
 
         private uint GetModsBits(List<string> mods)
         {

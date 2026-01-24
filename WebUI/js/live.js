@@ -312,6 +312,7 @@ class LiveModule {
             if (this.slots.countMiss) this.slots.countMiss.setValue(suppressStats ? 0 : hMiss);
         } else {
             // Song select: everything should be "the max"
+            // Show total objects as "Great" hits
             if (this.slots.count300) this.slots.count300.setValue(data.totalObjects || 0);
             if (this.slots.count100) this.slots.count100.setValue(0);
             if (this.slots.count50) this.slots.count50.setValue(0);

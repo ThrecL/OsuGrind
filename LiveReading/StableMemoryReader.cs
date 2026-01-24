@@ -219,7 +219,8 @@ namespace OsuGrind.LiveReading
                     }
 
                     snapshot.ModsList = ParseMods(modsBits, true);
-                    snapshot.Mods = string.Join("", snapshot.ModsList);
+                    snapshot.Mods = string.Join(",", snapshot.ModsList);
+
 
                     if (_rosuService != null && _rosuService.IsLoaded)
                     {

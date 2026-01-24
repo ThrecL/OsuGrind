@@ -662,10 +662,23 @@ class HistoryModule {
             'NC': 'mod-nightcore', 'FL': 'mod-flashlight', 'AT': 'mod-autoplay',
             'SO': 'mod-spun-out', 'AP': 'mod-autopilot', 'PF': 'mod-perfect',
             'CL': 'mod-classic', 'MR': 'mod-mirror', 'DC': 'mod-daycore',
-            'TP': 'mod-target-practice', 'SV2': 'mod-score-v2'
+            'TP': 'mod-target-practice', 'SV2': 'mod-score-v2', 'DA': 'mod-difficulty-adjust',
+            'BL': 'mod-blinds', 'ST': 'mod-strict-tracking', 'AC': 'mod-accuracy-challenge',
+            'AL': 'mod-alternate', 'SG': 'mod-single-tap', 'WU': 'mod-wind-up',
+            'WD': 'mod-wind-down', 'TC': 'mod-traceable', 'BR': 'mod-barrel-roll',
+            'AD': 'mod-approach-different', 'MU': 'mod-muted', 'NS': 'mod-no-scope',
+            'MG': 'mod-magnetised', 'RP': 'mod-repel', 'AS': 'mod-adaptive-speed',
+            'FR': 'mod-freeze-frame', 'BU': 'mod-bubbles', 'SY': 'mod-synesthesia',
+            'DP': 'mod-depth', 'BM': 'mod-bloom', 'IN': 'mod-invert',
+            'CS': 'mod-constant-speed', 'HO': 'mod-hold-off', 'NR': 'mod-no-release',
+            'CO': 'mod-cover', 'FI': 'mod-fade-in', 'SI': 'mod-spin-in',
+            'GR': 'mod-grow', 'DF': 'mod-deflate', 'WG': 'mod-wiggle',
+            'TR': 'mod-transform', 'FF': 'mod-floating-fruits', 'DS': 'mod-dual-stages',
+            'SW': 'mod-swap', 'SR': 'mod-simplified-rhythm'
         };
         return iconMap[mod.toUpperCase()] || `mod-${mod.toLowerCase()}`;
     }
+
 
     getStarBadgeHTML(sr) {
         if (sr == null) return '';
