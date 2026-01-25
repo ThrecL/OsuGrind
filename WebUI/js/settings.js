@@ -15,25 +15,7 @@ class SettingsModule {
     }
 
     setupEventListeners() {
-        // Path browse buttons
-        document.querySelectorAll('.browse-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const pathType = btn.dataset.path;
-                await this.browsePath(pathType);
-            });
-        });
-
         // Toggle switches
-        document.getElementById('comboSounds')?.addEventListener('change', (e) => {
-            this.settings.comboSoundsEnabled = e.target.checked;
-            this.saveSettings();
-        });
-
-        document.getElementById('achievementSounds')?.addEventListener('change', (e) => {
-            this.settings.achievementSoundsEnabled = e.target.checked;
-            this.saveSettings();
-        });
-
         document.getElementById('passSound')?.addEventListener('change', (e) => {
             this.settings.passSoundEnabled = e.target.checked;
             this.saveSettings();
@@ -70,13 +52,6 @@ class SettingsModule {
 
     updateUI() {
         const s = this.settings;
-
-        document.getElementById('lazerPath').value = s.lazerPath || '';
-        document.getElementById('stablePath').value = s.stablePath || '';
-
-
-        document.getElementById('comboSounds').checked = s.comboSoundsEnabled || false;
-        document.getElementById('achievementSounds').checked = s.achievementSoundsEnabled || false;
         document.getElementById('passSound').checked = s.passSoundEnabled || false;
         document.getElementById('failSound').checked = s.failSoundEnabled || false;
         document.getElementById('debugLogging').checked = s.debugLoggingEnabled || false;
@@ -90,57 +65,52 @@ class SettingsModule {
         }
     }
 
-    async browsePath(type) {
-        try {
-            const result = await window.api.browseFolder(type);
-            if (result.path) {
-                switch (type) {
-                    case 'lazer':
-                        this.settings.lazerPath = result.path;
-                        document.getElementById('lazerPath').value = result.path;
-                        break;
-                    case 'stable':
-                        this.settings.stablePath = result.path;
-                        document.getElementById('stablePath').value = result.path;
-                        break;
-
-                }
-                await this.saveSettings();
-            }
-        } catch (error) {
-            console.error('[Settings] Browse failed:', error);
-        }
-    }
-
     async importLazer() {
         const btn = document.getElementById('importLazerBtn');
-        btn.disabled = true;
+        const originalText = btn.textContent;
         btn.textContent = 'Importing...';
+        btn.disabled = true;
 
         try {
             const result = await window.api.importLazer();
-            alert(`Imported ${result.count} scores from Lazer!`);
+            if (result.success) {
+                alert(`Import successful! Added: ${result.count}, Skipped: ${result.skipped}`);
+                if (window.analyticsModule) window.analyticsModule.refresh(true);
+                if (window.historyModule) window.historyModule.refresh();
+            } else {
+                alert('Import failed: ' + result.message);
+            }
         } catch (error) {
+            console.error(error);
             alert('Import failed: ' + error.message);
         } finally {
+            btn.textContent = originalText;
             btn.disabled = false;
-            btn.textContent = 'Import Lazer Scores';
         }
     }
 
     async importStable() {
+        const aliases = prompt("Enter additional guest aliases to import (comma separated):", "");
         const btn = document.getElementById('importStableBtn');
-        btn.disabled = true;
+        const originalText = btn.textContent;
         btn.textContent = 'Importing...';
+        btn.disabled = true;
 
         try {
-            const result = await window.api.importStable();
-            alert(`Imported ${result.count} scores from Stable!`);
+            const result = await window.api.fetch(`/api/import/stable?aliases=${encodeURIComponent(aliases || '')}`, { method: 'POST' });
+            if (result.success) {
+                alert(`Imported ${result.count} scores from Stable!`);
+                if (window.analyticsModule) window.analyticsModule.refresh(true);
+                if (window.historyModule) window.historyModule.refresh();
+            } else {
+                alert('Import failed: ' + result.message);
+            }
         } catch (error) {
+            console.error(error);
             alert('Import failed: ' + error.message);
         } finally {
+            btn.textContent = originalText;
             btn.disabled = false;
-            btn.textContent = 'Import Stable Scores';
         }
     }
 
@@ -150,10 +120,10 @@ class SettingsModule {
 
     async deleteAllScores() {
         if (!confirm('Are you SURE you want to delete ALL score history? This cannot be undone.')) return;
-
         try {
             await window.api.deleteAllScores();
             alert('All scores deleted successfully.');
+            if (window.historyModule) window.historyModule.refresh();
         } catch (error) {
             alert('Failed to delete scores: ' + error.message);
         }
@@ -161,7 +131,6 @@ class SettingsModule {
 
     async deleteAllBeatmaps() {
         if (!confirm('Are you SURE you want to delete ALL beatmap cache? This cannot be undone.')) return;
-
         try {
             await window.api.deleteAllBeatmaps();
             alert('All beatmaps deleted successfully.');

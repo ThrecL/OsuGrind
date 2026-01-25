@@ -1819,6 +1819,29 @@ namespace OsuGrind.LiveReading
             }
         }
 
+        private string? ReadScoreHash(IntPtr scoreInfoPtr)
+        {
+            if (scoreInfoPtr == IntPtr.Zero) return null;
+            // Scan for a 32-character hex string (MD5 hash) in the ScoreInfo object
+            // These offsets cover most Lazer versions
+            int[] hashOffsets = { 0x98, 0x80, 0xA0, 0x90, 0x88, 0x78 };
+            foreach (var offset in hashOffsets)
+            {
+                try
+                {
+                    IntPtr ptr = _scanner.ReadIntPtr(IntPtr.Add(scoreInfoPtr, offset));
+                    if (ptr == IntPtr.Zero) continue;
+                    string s = _scanner.ReadString(ptr);
+                    if (!string.IsNullOrEmpty(s) && s.Length == 32 && s.All(c => "0123456789abcdefABCDEF".Contains(c)))
+                    {
+                        return s;
+                    }
+                }
+                catch { }
+            }
+            return null;
+        }
+
         private long ReadResultScoreInfo(IntPtr scoreInfoPtr, LiveSnapshot snapshot)
         {
             long standardizedScore = _scanner.ReadInt64(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.TotalScore));
@@ -1855,6 +1878,10 @@ namespace OsuGrind.LiveReading
                 _currentModSettings = new ModSettings();
 
                 long standardizedScore = ReadResultScoreInfo(scoreInfoPtr, snapshot);
+                
+                // Read Replay Hash from ScoreInfo
+                snapshot.MD5Hash = ReadScoreHash(scoreInfoPtr) ?? snapshot.MD5Hash;
+                snapshot.ReplayHash = snapshot.MD5Hash; // In Lazer, score hash is often the filename in 'files'
 
                 // Read Maximum Statistics for reliable total object count
                 IntPtr maxStatsDict = _scanner.ReadIntPtr(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.maximumStatistics));

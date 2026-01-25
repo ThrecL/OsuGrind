@@ -126,13 +126,20 @@ class OsuGrindAPI {
                     ...options.headers
                 }
             });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            return await response.json();
+            const data = await response.json();
+            if (!response.ok) {
+                const errorMsg = data.message || data.error || `HTTP ${response.status}`;
+                throw new Error(errorMsg);
+            }
+            return data;
         } catch (error) {
-            console.error(`[API] ${endpoint} failed:`, error);
+            if (error.message.startsWith('HTTP')) {
+                 console.error(`[API] ${endpoint} failed:`, error);
+            }
             throw error;
         }
     }
+
 
     // History
     async getHistoryForDate(date) {

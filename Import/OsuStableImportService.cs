@@ -1,9 +1,17 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
+using System.Text;
+using System.Diagnostics;
 using OsuGrind.Models;
 using OsuGrind.Services;
+using OsuGrind.Api;
+
+using Microsoft.Win32;
+using System.Text.RegularExpressions;
+
 
 namespace OsuGrind.Import
 {
@@ -14,6 +22,66 @@ namespace OsuGrind.Import
         public OsuStableImportService(TrackerDb db)
         {
             _db = db;
+        }
+
+        public static string? AutoDetectStablePath()
+        {
+            try
+            {
+                // 1. SMART CHECK: Is osu! running right now?
+                var processes = Process.GetProcessesByName("osu!");
+                foreach (var p in processes)
+                {
+                    try
+                    {
+                        if (p.MainModule != null)
+                        {
+                            var pPath = p.MainModule.FileName;
+                            var dir = Path.GetDirectoryName(pPath);
+                            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir) && File.Exists(Path.Combine(dir, "scores.db"))) return dir;
+                        }
+                    }
+                    catch { }
+                }
+
+                // 2. Check Registry
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\osu!");
+                if (key != null)
+                {
+                    var path = key.GetValue("InstallPath") as string;
+                    if (!string.IsNullOrEmpty(path) && Directory.Exists(path) && File.Exists(Path.Combine(path, "scores.db"))) return path;
+                }
+
+                // 3. Common paths
+                var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                var candidates = new List<string>
+                {
+                    Path.Combine(localAppData, "osu!"),
+                    @"C:\osu!",
+                    @"D:\osu!",
+                    @"E:\osu!",
+                    @"F:\osu!",
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "osu!"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "osu!")
+                };
+
+                // 4. Proactive search: Check parents of current executable (Portable mode)
+                var currentDir = AppDomain.CurrentDomain.BaseDirectory;
+                var parent = Directory.GetParent(currentDir);
+                while (parent != null)
+                {
+                    candidates.Add(Path.Combine(parent.FullName, "osu!"));
+                    if (parent.Name.Equals("osu!", StringComparison.OrdinalIgnoreCase)) candidates.Add(parent.FullName);
+                    parent = parent.Parent;
+                }
+
+                foreach (var c in candidates.Distinct())
+                {
+                    if (Directory.Exists(c) && File.Exists(Path.Combine(c, "scores.db"))) return c;
+                }
+            }
+            catch { }
+            return null;
         }
 
         private class BeatmapInfo
@@ -27,14 +95,78 @@ namespace OsuGrind.Import
 
         private Dictionary<string, BeatmapInfo> _beatmaps = new(StringComparer.OrdinalIgnoreCase);
 
-        public async Task<(int added, int skipped, string error)> ImportScoresAsync(string scoresDbPath)
+        public async Task<(int added, int skipped, string error)> ImportScoresAsync(string? stablePath = null, string? targetUsername = null, string? aliases = null)
         {
+            DebugService.Log($"OsuStableImportService.ImportScoresAsync started with aliases: {aliases}", "StableImport");
+            
+            // Try provided path, then auto-detect if invalid
+            string path = stablePath ?? "";
+            if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
+            {
+                path = AutoDetectStablePath() ?? "";
+            }
+
+            if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
+                return (0, 0, "osu! stable path not found. Please locate it in settings.");
+
+            var scoresDbPath = Path.Combine(path, "scores.db");
             if (!File.Exists(scoresDbPath))
-                return (0, 0, "scores.db not found.");
+                return (0, 0, "scores.db not found in " + path);
+
+            // Parse aliases
+            var aliasList = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(aliases))
+            {
+                foreach (var a in aliases.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    aliasList.Add(a.Trim());
+            }
+            
+            string likelyUser = targetUsername;
+            if (string.IsNullOrEmpty(likelyUser))
+            {
+                // Auto-detect likely local user from scores.db
+                var counts = new Dictionary<string, int>();
+                try {
+                    using (var fs = File.OpenRead(scoresDbPath))
+                    using (var r = new BinaryReader(fs)) {
+                        r.ReadInt32(); // version
+                        int bmCount = r.ReadInt32();
+                        for (int i = 0; i < bmCount; i++) {
+                            ReadOsuString(r); // md5
+                            int sCount = r.ReadInt32();
+                            for (int j = 0; j < sCount; j++) {
+                                r.ReadByte(); r.ReadInt32(); ReadOsuString(r); // mode, ver, md5
+                                string pName = ReadOsuString(r);
+                                ReadOsuString(r); // replay md5
+                                r.BaseStream.Seek(10, SeekOrigin.Current); // hits
+                                r.ReadInt32(); r.ReadUInt16(); r.ReadBoolean(); r.ReadInt32(); ReadOsuString(r); r.ReadInt64(); // score, combo, perfect, mods, graph, date
+                                r.ReadInt32(); // -1
+                                long onlineId = r.ReadInt64();
+                                if (onlineId <= 0 && !string.IsNullOrEmpty(pName) && !pName.Equals("Guest", StringComparison.OrdinalIgnoreCase)) {
+                                    counts[pName] = counts.GetValueOrDefault(pName) + 1;
+                                }
+                            }
+                        }
+                    }
+                    likelyUser = counts.OrderByDescending(x => x.Value).FirstOrDefault().Key;
+                } catch { }
+            }
+
+            if (!string.IsNullOrEmpty(likelyUser)) aliasList.Add(likelyUser);
+            aliasList.Add("Guest");
+            if (!string.IsNullOrEmpty(targetUsername)) aliasList.Add(targetUsername);
+
+            DebugService.Log($"Found stable at: {path}. Importing for aliases: {string.Join(", ", aliasList)}", "StableImport");
+
+            // Update settings if we found a path and it wasn't set
+            if (string.IsNullOrEmpty(stablePath) || !stablePath.Equals(path, StringComparison.OrdinalIgnoreCase))
+            {
+                SettingsManager.Current.StablePath = path;
+                SettingsManager.Save();
+            }
 
             // Try to load osu!.db from the same folder to get map names
-            var folder = Path.GetDirectoryName(scoresDbPath);
-            var osuDbPath = Path.Combine(folder ?? "", "osu!.db");
+            var osuDbPath = Path.Combine(path, "osu!.db");
 
             if (File.Exists(osuDbPath))
             {
@@ -52,10 +184,15 @@ namespace OsuGrind.Import
             int skipped = 0;
             string error = "";
 
+            using var rosuService = new RosuService();
+
             await Task.Run(async () =>
             {
                 try
                 {
+                    // Cache existing signatures for deduplication
+                    var existingSignatures = await _db.GetExistingScoreSignaturesAsync();
+
                     using (var fs = File.OpenRead(scoresDbPath))
                     using (var r = new BinaryReader(fs))
                     {
@@ -64,132 +201,204 @@ namespace OsuGrind.Import
 
                         for (int i = 0; i < beatmapCount; i++)
                         {
-                            // Beatmap info (we ignore MD5 here, assuming scores are what matters)
-                            // But we specifically need valid play rows.
-
-                            // To skip beatmap info correctly?
-                            // Wait, structure is:
-                            //  Beatmap MD5 (String)
-                            //  Score Count (Int32)
-                            //  Scores...
-
-                            // Let's verify structure again. 
-                            // scores.db contains beatmaps? 
-                            // Actually it is:
-                            // Loop BeatmapCount:
-                            //    MD5 (String)
-                            //    ScoreCount (Int32)
-                            //    Loop ScoreCount:
-                            //       Score Data...
-
                             var beatmapMd5 = ReadOsuString(r);
                             var scoreCount = r.ReadInt32();
 
                             for (int j = 0; j < scoreCount; j++)
                             {
-                                // Parse Score - format from OsuParsers
-                                var mode = r.ReadByte();
-                                var scoreVersion = r.ReadInt32();
-                                var mapMd5 = ReadOsuString(r);
-                                var playerName = ReadOsuString(r);
-                                var replayMd5 = ReadOsuString(r);
-                                var cnt300 = r.ReadUInt16();   // UNSIGNED
-                                var cnt100 = r.ReadUInt16();   // UNSIGNED
-                                var cnt50 = r.ReadUInt16();    // UNSIGNED
-                                var cntGeki = r.ReadUInt16();  // UNSIGNED
-                                var cntKatu = r.ReadUInt16();  // UNSIGNED
-                                var misses = r.ReadUInt16();   // UNSIGNED
-                                var scoreVal = r.ReadInt32();
-                                var maxCombo = r.ReadUInt16(); // UNSIGNED
-                                var perfect = r.ReadBoolean();
-                                var mods = r.ReadInt32();
-                                var lifeBarGraph = ReadOsuString(r); // Life bar graph data (empty string)
-                                var timestamp = r.ReadInt64();
-                                r.BaseStream.Seek(sizeof(int), SeekOrigin.Current); // Skip -1 marker
-                                var onlineId = r.ReadInt64();
-
-                                // Parse timestamp - OsuParsers uses ReadDateTime which calls FromBinary
-                                var createdAt = DateTime.UtcNow;
                                 try
                                 {
-                                    createdAt = DateTime.FromBinary(timestamp);
-                                    // If local, convert to UTC
-                                    if (createdAt.Kind == DateTimeKind.Local)
-                                        createdAt = createdAt.ToUniversalTime();
-                                }
-                                catch { createdAt = DateTime.UtcNow; }
+                                    // Parse Score
+                                    var mode = r.ReadByte();
+                                    var scoreVersion = r.ReadInt32();
+                                    var mapMd5 = ReadOsuString(r);
+                                    var playerName = ReadOsuString(r);
+                                    var replayMd5 = ReadOsuString(r);
+                                    var cnt300 = r.ReadUInt16();
+                                    var cnt100 = r.ReadUInt16();
+                                    var cnt50 = r.ReadUInt16();
+                                    var cntGeki = r.ReadUInt16();
+                                    var cntKatu = r.ReadUInt16();
+                                    var misses = r.ReadUInt16();
+                                    var scoreVal = r.ReadInt32();
+                                    var maxCombo = r.ReadUInt16();
+                                    var perfect = r.ReadBoolean();
+                                    var mods = r.ReadInt32();
+                                    var lifeBarGraph = ReadOsuString(r);
+                                    var timestamp = r.ReadInt64();
+                                    r.ReadInt32(); // Skip 0xFFFFFFFF marker
+                                    var onlineId = r.ReadInt64();
+                                    
+                                    if (mode != 0) continue; // Only Standard
 
-                                if (mode != 0) continue; // Only Standard
-
-                                // Metadata lookup
-                                _beatmaps.TryGetValue(mapMd5, out var info);
-
-                                // Stars lookup: osu!.db stores stars per mod combo
-                                // Difficulty modifier bits: EZ=2, HR=16, DT=64, HT=256, NC=512, FL=1024
-                                int diffMods = mods & (2 | 16 | 64 | 256 | 512 | 1024);
-
-                                double stars = 0;
-                                if (info != null)
-                                {
-                                    if (!info.Stars.TryGetValue(diffMods, out stars))
+                                    // FILTER: Only user/local/alias replays
+                                    if (!aliasList.Contains(playerName))
                                     {
-                                        // Specific combo not found, try normalizing NC to DT
-                                        if ((diffMods & 512) > 0)
-                                        {
-                                            int normalizedMods = (diffMods & ~512) | 64;
-                                            if (info.Stars.TryGetValue(normalizedMods, out stars))
-                                            {
-                                                // Found with normalized mods
-                                            }
-                                        }
+                                        continue;
+                                    }
 
-                                        if (stars == 0)
+                                    var createdAt = DateTime.UtcNow;
+
+                                    try
+                                    {
+                                        createdAt = DateTime.FromBinary(timestamp);
+                                        if (createdAt.Kind == DateTimeKind.Local) createdAt = createdAt.ToUniversalTime();
+                                    }
+                                    catch { createdAt = DateTime.UtcNow; }
+
+                                    // DEDUPLICATION CHECK
+                                    string sig = $"{mapMd5}|{scoreVal}|{createdAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)}";
+                                    if (existingSignatures.Contains(sig))
+                                    {
+                                        skipped++;
+                                        continue;
+                                    }
+                                    existingSignatures.Add(sig);
+
+                                    // Metadata lookup
+                                    _beatmaps.TryGetValue(mapMd5, out var info);
+
+                                    int diffMods = mods & (2 | 16 | 64 | 256 | 512 | 1024);
+                                    double stars = 0;
+                                    if (info != null)
+                                    {
+                                        if (!info.Stars.TryGetValue(diffMods, out stars))
                                         {
-                                            // Fallback to Nomod if mod combo still not found
-                                            info.Stars.TryGetValue(0, out stars);
+                                            if ((diffMods & 512) > 0)
+                                            {
+                                                int normalizedMods = (diffMods & ~512) | 64;
+                                                info.Stars.TryGetValue(normalizedMods, out stars);
+                                            }
+                                            if (stars == 0) info.Stars.TryGetValue(0, out stars);
                                         }
                                     }
-                                }
 
-                                var play = new PlayRow
-                                {
-                                    ScoreId = onlineId > 0 ? onlineId : 0,
-                                    CreatedAtUtc = createdAt,
+                                    // Calculate Accuracy
+                                    double acc = CalculateAccuracy(cnt300, cnt100, cnt50, misses);
 
-                                    Outcome = "pass",
-                                    DurationMs = info?.TotalTime ?? 0,
-                                    Beatmap = info?.Name ?? $"[Stable] {mapMd5.Substring(0, Math.Min(8, mapMd5.Length))}",
-                                    BeatmapHash = mapMd5,
-                                    Mods = ParseMods(mods),
-                                    Stars = stars,
-                                    // Accuracy is computed
-                                    Score = (int)Math.Min(int.MaxValue, (long)scoreVal),
-                                    Combo = maxCombo,
-                                    Count300 = cnt300,
-                                    Count100 = cnt100,
-                                    Count50 = cnt50,
-                                    Misses = misses,
-                                    // PP Calc
-                                    PP = 0,
-                                    Notes = "Imported from scores.db"
-                                };
+                                    // Calculate PP via RosuService
+                                    double calculatedPP = 0;
+                                    string? osuPath = info != null ? Path.Combine(path, "Songs", info.FolderName, info.FileName) : "";
+                                    
+                                    if (File.Exists(osuPath))
+                                    {
+                                        try
+                                        {
+                                            rosuService.UpdateContext(osuPath);
+                                            // Add bit 24 (Classic) to the mod mask for rosu calculation
+                                            uint modsBits = (uint)mods | (1u << 24);
+                                            double clockRate = RosuService.GetClockRateFromMods(modsBits);
+                                            
+                                            // Stable scores in scores.db are always PASS (outcome="pass")
+                                            // so we can use -1 for passedObjects to indicate a full calculation
+                                            calculatedPP = rosuService.CalculatePp(modsBits, (int)maxCombo, (int)cnt300, (int)cnt100, (int)cnt50, (int)misses, -1, clockRate: clockRate);
+                                        }
+                                        catch { }
+                                    }
 
-                                // Calculate PP if map file exists
-                                // Rosu removed.
+                                    // REPLAY LINKING: Stable replays are stored in Data/r/MD5.osr
+                                    string linkedReplayFile = "";
+                                    if (!string.IsNullOrEmpty(replayMd5))
+                                    {
+                                        var replayCandidate = Path.Combine(path, "Data", "r", $"{replayMd5}.osr");
+                                        if (File.Exists(replayCandidate)) linkedReplayFile = replayCandidate;
+                                    }
 
-                                // Fix Date: ticks are usually local time in older osu versions?
-                                // Actually, DateTime(ticks) might be Unspecified.
-                                // We'll treat as UTC for consistency or Local?
-                                // Let's assume Valid Ticks.
+                                    var play = new PlayRow
+                                    {
+                                        ScoreId = 0,
+                                        CreatedAtUtc = createdAt,
+                                        Outcome = "pass",
+                                        DurationMs = info?.TotalTime ?? 0,
+                                        Beatmap = info?.Name ?? $"[Stable] {mapMd5.Substring(0, Math.Min(8, mapMd5.Length))}",
+                                        BeatmapHash = mapMd5,
+                                        Mods = ParseMods(mods),
+                                        Stars = stars,
+                                        Accuracy = acc,
+                                        Score = scoreVal,
+                                        Combo = maxCombo,
+                                        Count300 = cnt300,
+                                        Count100 = cnt100,
+                                        Count50 = cnt50,
+                                        Misses = misses,
+                                        PP = calculatedPP,
+                                        Notes = "Imported from scores.db",
+                                        MapPath = osuPath ?? "",
+                                        ReplayFile = linkedReplayFile,
+                                        ReplayHash = replayMd5 // Ensure this is set so UI knows it's imported
+                                    };
 
-                                try
-                                {
                                     await _db.InsertPlayAsync(play);
+
+                                    // ALSO POPULATE BEATMAPS TABLE for backgrounds/metadata
+                                    if (info != null)
+                                    {
+                                        var bgPath = Path.Combine(path, "Songs", info.FolderName, info.FileName);
+                                        // Attempt to find real background file from .osu content?
+                                        // For now, if we can find the .osu, we can parse it.
+                                        string bgIdentifier = "";
+                                        if (File.Exists(osuPath))
+                                        {
+                                            try {
+                                                var lines = File.ReadLines(osuPath);
+                                                var eventsSection = lines.SkipWhile(l => l.Trim() != "[Events]").Skip(1).TakeWhile(l => !l.Trim().StartsWith("["));
+                                                foreach (var line in eventsSection)
+                                                {
+                                                    var trimmed = line.Trim();
+                                                    if (trimmed.StartsWith("0,0,"))
+                                                    {
+                                                        // Event format: Type, StartTime, Filename, XOffset, YOffset
+                                                        // filename can be quoted or not
+                                                        var match = Regex.Match(trimmed, @"0,0,""?([^"",\r\n]+\.(?:jpg|jpeg|png))""?", RegexOptions.IgnoreCase);
+                                                        if (match.Success)
+                                                        {
+                                                            var bgFileName = match.Groups[1].Value;
+                                                            var fullBgPath = Path.Combine(path, "Songs", info.FolderName, bgFileName);
+                                                            if (File.Exists(fullBgPath))
+                                                            {
+                                                                bgIdentifier = "STABLE:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(fullBgPath));
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } catch { }
+                                        }
+
+                                        var beatmapRow = new BeatmapRow
+                                        {
+                                            Hash = mapMd5,
+                                            Title = info.Name.Split(" - ").Last().Split(" [").First(),
+                                            Artist = info.Name.Split(" - ").First(),
+                                            Version = info.Name.Contains("[") ? info.Name.Split("[").Last().TrimEnd(']') : "",
+                                            Stars = stars,
+                                            LengthMs = info.TotalTime,
+                                            BackgroundHash = bgIdentifier,
+                                            LastPlayedUtc = createdAt,
+                                            CS = rosuService.CS,
+                                            AR = rosuService.AR,
+                                            OD = rosuService.OD,
+                                            HP = rosuService.HP,
+                                            BPM = rosuService.BaseBpm,
+                                            Circles = rosuService.TotalCircles,
+                                            Sliders = rosuService.TotalSliders,
+                                            Spinners = rosuService.TotalSpinners
+                                        };
+
+                                        // Try to get MaxCombo from a perfect SS result
+                                        try {
+                                            var perf = rosuService.CalculatePpIfFc(osuPath, new List<string>(), 100.0);
+                                            if (perf.MaxCombo > 0) beatmapRow.MaxCombo = perf.MaxCombo;
+                                            if (beatmapRow.Stars <= 0) beatmapRow.Stars = perf.Stars;
+                                        } catch { }
+
+                                        await _db.InsertOrUpdateBeatmapAsync(beatmapRow);
+                                    }
                                     added++;
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[Import] Error inserting score for {play.Beatmap}: {ex.Message}");
+                                    Console.WriteLine($"[Import] Error parsing score at index {j} for map {beatmapMd5}: {ex.Message}");
                                     skipped++;
                                 }
                             }
@@ -204,6 +413,7 @@ namespace OsuGrind.Import
 
             return (added, skipped, error);
         }
+
 
         private string ReadOsuString(BinaryReader r)
         {
@@ -360,11 +570,9 @@ namespace OsuGrind.Import
 
         private string ParseMods(int mods)
         {
-            if (mods == 0) return "NM";
             var list = new List<string>();
             if ((mods & 1) > 0) list.Add("NF");
             if ((mods & 2) > 0) list.Add("EZ");
-            // ... strict set
             if ((mods & 8) > 0) list.Add("HD");
             if ((mods & 16) > 0) list.Add("HR");
             if ((mods & 32) > 0) list.Add("SD");
@@ -376,7 +584,11 @@ namespace OsuGrind.Import
             if ((mods & 4096) > 0) list.Add("SO");
             if ((mods & 16384) > 0) list.Add("PF");
 
-            return string.Join("", list);
+            // All stable plays are Classic
+            list.Add("CL");
+
+            return string.Join(",", list);
         }
+
     }
 }

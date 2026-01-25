@@ -33,8 +33,9 @@ public partial class WebViewWindow : Window
     {
         // Core setup
         Title = "Osu!Grind";
-        Width = 1150;
-        Height = 780;
+        Width = 1175;
+        Height = 815;
+
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         WindowStyle = WindowStyle.None;
         AllowsTransparency = false;

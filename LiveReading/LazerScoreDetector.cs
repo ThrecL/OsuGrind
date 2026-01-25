@@ -148,19 +148,44 @@ public class LazerScoreDetector
     {
         return new CompletedPlay
         {
-            ScoreId = 0, CreatedAtUtc = DateTime.UtcNow, BeatmapHash = s.MD5Hash ?? "", Beatmap = s.Beatmap,
-            Artist = s.Artist ?? "", Title = s.Title ?? "", Version = s.Version ?? "", Mods = s.Mods,
-            Outcome = outcome, UR = s.LiveUR, HitOffsets = string.Join(",", s.LiveHitOffsets),
-            DurationMs = s.TimeMs ?? s.TotalTimeMs ?? 0, Stars = s.Stars, Accuracy = s.Accuracy ?? 0,
-            Score = s.Score ?? 0, MaxCombo = s.MaxCombo ?? s.Combo ?? 0,
-            Count300 = s.HitCounts?.Count300 ?? 0, Count100 = s.HitCounts?.Count100 ?? 0,
-            Count50 = s.HitCounts?.Count50 ?? 0, Misses = s.HitCounts?.Misses ?? 0, PP = s.PP ?? 0,
-            TimelineJson = SerializeTimeline(), PpTimelineJson = SerializePpTimeline(),
-            AimOffsetsJson = s.AimOffsetsJson, CS = s.CS ?? 0, AR = s.AR ?? 0, OD = s.OD ?? 0, HP = s.HP ?? 0,
-            BPM = s.BPM ?? 0, LengthMs = s.TotalTimeMs ?? 0, Circles = s.Circles ?? 0,
-            Sliders = s.Sliders ?? 0, Spinners = s.Spinners ?? 0, BackgroundHash = s.BackgroundHash
+            ScoreId = 0, 
+            CreatedAtUtc = s.ScoreDate?.ToUniversalTime() ?? DateTime.UtcNow, 
+            BeatmapHash = s.MD5Hash ?? "", 
+            Beatmap = s.Beatmap,
+            Artist = s.Artist ?? "", 
+            Title = s.Title ?? "", 
+            Version = s.Version ?? "", 
+            Mods = s.Mods,
+            Outcome = outcome, 
+            UR = s.LiveUR, 
+            HitOffsets = string.Join(",", s.LiveHitOffsets),
+            DurationMs = s.TimeMs ?? s.TotalTimeMs ?? 0, 
+            Stars = s.Stars, 
+            Accuracy = s.Accuracy ?? 0,
+            Score = s.Score ?? 0, 
+            MaxCombo = s.MaxCombo ?? s.Combo ?? 0,
+            Count300 = s.HitCounts?.Count300 ?? 0, 
+            Count100 = s.HitCounts?.Count100 ?? 0,
+            Count50 = s.HitCounts?.Count50 ?? 0, 
+            Misses = s.HitCounts?.Misses ?? 0, 
+            PP = s.PP ?? 0,
+            TimelineJson = SerializeTimeline(), 
+            PpTimelineJson = SerializePpTimeline(),
+            AimOffsetsJson = s.AimOffsetsJson, 
+            CS = s.CS ?? 0, 
+            AR = s.AR ?? 0, 
+            OD = s.OD ?? 0, 
+            HP = s.HP ?? 0,
+            BPM = s.BPM ?? 0, 
+            LengthMs = s.TotalTimeMs ?? 0, 
+            Circles = s.Circles ?? 0,
+            Sliders = s.Sliders ?? 0, 
+            Spinners = s.Spinners ?? 0, 
+            BackgroundHash = s.BackgroundHash,
+            ReplayHash = s.ReplayHash ?? ""
         };
     }
+
 
     private void RecordPlay(CompletedPlay play, bool isPass)
     {

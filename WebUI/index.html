@@ -209,25 +209,32 @@
                             class="mini-value accent" id="totalPlays">0</span></div>
                     <div class="card mini-card"><span class="mini-label">PLAY TIME</span><span
                             class="mini-value neon-cyan" id="totalTime">0h</span></div>
-                    <div class="card mini-card"><span class="mini-label">24H AVG ACC</span><span
+                    <div class="card mini-card"><span class="mini-label" id="avgAccLabel">AVG ACCURACY</span><span
                             class="mini-value neon-green" id="avgAcc">0%</span></div>
-                    <div class="card mini-card"><span class="mini-label">24H AVG PP</span><span
+                    <div class="card mini-card"><span class="mini-label" id="avgPPLabel">AVG PP</span><span
                             class="mini-value neon-purple" id="avgPP">0</span></div>
                 </div>
 
-                <!-- Daily Activity Chart -->
-                <div class="card chart-card">
-                    <h3 class="chart-title gradient-purple-green">DAILY ACTIVITY</h3>
-                    <div class="chart-container">
-                        <canvas id="activityChart"></canvas>
+                <!-- Main Analytics Card -->
+                <div class="card chart-card main-analytics-card">
+                    <div class="chart-header">
+                        <div class="metric-selector">
+                            <button class="p-btn active" data-metric="pp">PP PROGRESS</button>
+                            <button class="p-btn" data-metric="performance">PERFORMANCE</button>
+                            <button class="p-btn" data-metric="activity">ACTIVITY</button>
+                            <button class="p-btn" data-metric="accuracy">ACCURACY</button>
+                        </div>
+                        <div class="period-selector">
+                            <button class="p-btn" data-days="7">7D</button>
+                            <button class="p-btn active" data-days="30">30D</button>
+                            <button class="p-btn" data-days="90">90D</button>
+                            <button class="p-btn" data-days="180">180D</button>
+                            <button class="p-btn" data-days="360">360D</button>
+                            <button class="p-btn" data-days="0">ALL</button>
+                        </div>
                     </div>
-                </div>
-
-                <!-- Performance Chart -->
-                <div class="card chart-card">
-                    <h3 class="chart-title gradient-pink-cyan">DAILY PERFORMANCE MATCH</h3>
                     <div class="chart-container">
-                        <canvas id="performanceChart"></canvas>
+                        <canvas id="mainAnalyticsChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -267,38 +274,10 @@
                 <h2 class="settings-title">Settings</h2>
 
                 <div class="settings-group">
-                    <h3 class="group-title">Paths</h3>
-                    <div class="setting-row">
-                        <label>osu!lazer Path</label>
-                        <div class="path-input">
-                            <input type="text" id="lazerPath" readonly>
-                            <button class="browse-btn" data-path="lazer">Browse</button>
-                        </div>
-                    </div>
-                    <div class="setting-row">
-                        <label>osu!stable Path</label>
-                        <div class="path-input">
-                            <input type="text" id="stablePath" readonly>
-                            <button class="browse-btn" data-path="stable">Browse</button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="settings-group">
                     <h3 class="group-title">General</h3>
                     <div class="setting-row toggle-row">
                         <label>Debug Logging (Console & Files)</label>
                         <label class="toggle"><input type="checkbox" id="debugLogging"><span class="slider"></span></label>
-                    </div>
-                    <div class="setting-row toggle-row">
-                        <label>Combo Sounds</label>
-                        <label class="toggle"><input type="checkbox" id="comboSounds"><span
-                                class="slider"></span></label>
-                    </div>
-                    <div class="setting-row toggle-row">
-                        <label>Achievement Sounds</label>
-                        <label class="toggle"><input type="checkbox" id="achievementSounds"><span
-                                class="slider"></span></label>
                     </div>
                     <div class="setting-row toggle-row">
                         <label>Pass Sound</label>
@@ -320,6 +299,7 @@
                         <button class="action-btn" id="exportCsvBtn">Export CSV</button>
                     </div>
                 </div>
+
 
                 <div class="settings-group danger-zone">
                     <h3 class="group-title">Danger Zone</h3>

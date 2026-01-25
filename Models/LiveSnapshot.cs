@@ -51,9 +51,11 @@ public sealed class CompletedPlay
     public string AimOffsetsJson { get; set; } = ""; // JSON array for aim scatter plot
     public string CursorOffsetsJson { get; set; } = ""; // JSON array for cursor heatmap
     public string ReplayFile { get; set; } = ""; // Path to the .osr replay file
+    public string ReplayHash { get; set; } = ""; // MD5 of the score/replay
     public string MapPath { get; set; } = ""; // Path to the .osu beatmap file
     public double UR { get; set; }
 }
+
 
 public sealed class LiveSnapshot
 {
@@ -133,6 +135,7 @@ public sealed class LiveSnapshot
     public List<string>? ModsList { get; set; }
 
     public bool IsLazer { get; set; }
+    public string? ReplayHash { get; set; }
 
     public LiveSnapshot Clone()
     {
@@ -258,9 +261,12 @@ public sealed class LiveSnapshot
         double? stars = TryGetDouble(j, "menu", "bm", "stats", "fullSR")
                         ?? TryGetDouble(j, "menu", "bm", "stats", "SR");
 
-        bool failed = TryGetInt(j, "gameplay", "hp", "normal") == 0 && playing;
+        bool healthZero = TryGetInt(j, "gameplay", "hp", "normal") == 0;
+        bool noFail = mods.Contains("NF");
+        bool failed = healthZero && !noFail && playing;
 
         int? c300 = TryGetInt(j, "gameplay", "hits", "300");
+
         int? c100 = TryGetInt(j, "gameplay", "hits", "100");
         int? c50 = TryGetInt(j, "gameplay", "hits", "50");
         int? miss = TryGetInt(j, "gameplay", "hits", "0");

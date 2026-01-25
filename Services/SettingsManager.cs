@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using OsuGrind.Import;
 
 namespace OsuGrind.Services;
+
 
 public class SettingsManager
 {
@@ -17,13 +19,15 @@ public class SettingsManager
         public string? LazerPath { get; set; }
         public string? StablePath { get; set; }
 
-        public bool ComboSoundsEnabled { get; set; } = true;
-        public bool AchievementSoundsEnabled { get; set; } = true;
         public bool PassSoundEnabled { get; set; } = true;
         public bool FailSoundEnabled { get; set; } = true;
         public bool DebugLoggingEnabled { get; set; } = false;
         public string? AccessToken { get; set; }
+        public string? Username { get; set; }
+        public double PeakPP { get; set; }
     }
+
+
 
     private static AppSettings _current = new();
     public static AppSettings Current => _current;
@@ -47,6 +51,14 @@ public class SettingsManager
             {
                 _current = new AppSettings();
             }
+
+            // Auto-detect paths if missing
+            if (string.IsNullOrEmpty(_current.StablePath))
+            {
+                _current.StablePath = OsuStableImportService.AutoDetectStablePath();
+                if (!string.IsNullOrEmpty(_current.StablePath)) Save();
+            }
+
         }
         catch
         {
@@ -73,18 +85,19 @@ public class SettingsManager
         if (dict.TryGetValue("lazerPath", out var lp)) _current.LazerPath = lp?.ToString();
         if (dict.TryGetValue("stablePath", out var sp)) _current.StablePath = sp?.ToString();
 
-        if (dict.TryGetValue("comboSoundsEnabled", out var cse)) _current.ComboSoundsEnabled = IsTrue(cse);
-        if (dict.TryGetValue("achievementSoundsEnabled", out var ase)) _current.AchievementSoundsEnabled = IsTrue(ase);
         if (dict.TryGetValue("passSoundEnabled", out var pse)) _current.PassSoundEnabled = IsTrue(pse);
         if (dict.TryGetValue("failSoundEnabled", out var fse)) _current.FailSoundEnabled = IsTrue(fse);
+
         if (dict.TryGetValue("debugLoggingEnabled", out var dle)) {
             _current.DebugLoggingEnabled = IsTrue(dle);
             DebugService.IsEnabled = _current.DebugLoggingEnabled;
         }
         if (dict.TryGetValue("accessToken", out var at)) _current.AccessToken = at?.ToString();
+        if (dict.TryGetValue("username", out var un)) _current.Username = un?.ToString();
         
         Save();
     }
+
 
     private static bool IsTrue(object? val)
     {

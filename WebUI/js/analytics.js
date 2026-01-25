@@ -1,26 +1,59 @@
 /**
  * OSU!GRIND Analytics Tab Module
- * Handles charts and analytics display
+ * Handles the unified chart and metrics display
  */
 
 class AnalyticsModule {
     constructor() {
-        this.activityChart = null;
-        this.performanceChart = null;
+        this.mainChart = null;
         this.loaded = false;
+        this.currentPeriod = 30;
+        this.currentMetric = 'pp';
+        this.rawData = null;
     }
 
     init() {
+        this.setupEventListeners();
         console.log('[Analytics] Module initialized');
     }
 
-    async refresh() {
-        if (this.loaded) return;
+    setupEventListeners() {
+        // Period buttons
+        document.querySelectorAll('.period-selector .p-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                this.currentPeriod = parseInt(e.target.dataset.days);
+                this.updateActiveButton('.period-selector', e.target);
+                this.refresh(true);
+            });
+        });
+
+        // Metric buttons
+        document.querySelectorAll('.metric-selector .p-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                this.currentMetric = e.target.dataset.metric;
+                this.updateActiveButton('.metric-selector', e.target);
+                if (this.rawData) this.renderMainChart();
+            });
+        });
+    }
+
+    updateActiveButton(selector, activeBtn) {
+        // Handle cases where child element (text) might be clicked
+        const btn = activeBtn.closest('.p-btn');
+        if (!btn) return;
+        
+        document.querySelectorAll(`${selector} .p-btn`).forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+
+    async refresh(force = false) {
+        if (this.loaded && !force) return;
 
         try {
-            const data = await window.api.getAnalytics();
+            const data = await window.api.fetch(`/api/analytics?days=${this.currentPeriod}`);
+            this.rawData = data;
             this.updateStats(data);
-            this.renderCharts(data);
+            this.renderMainChart();
             this.loaded = true;
         } catch (error) {
             console.error('[Analytics] Failed to load:', error);
@@ -28,164 +61,132 @@ class AnalyticsModule {
     }
 
     updateStats(data) {
-        document.getElementById('perfMatch').textContent = `${(data.performanceMatch || 0).toFixed(1)}%`;
-        document.getElementById('currentForm').textContent = data.currentForm || '—';
-
-        // Update Mentality Bar if exists
-        const mentalityFill = document.getElementById('mentalityFill');
-        const mentalityValue = document.getElementById('mentalityValue');
-        if (mentalityFill) mentalityFill.style.width = `${data.mentality || 0}%`;
-        if (mentalityValue) mentalityValue.textContent = `${(data.mentality || 0).toFixed(1)}%`;
-
-        // Skill insights
-        const insightsContainer = document.getElementById('skillInsights');
-        if (insightsContainer && data.insights) {
-            insightsContainer.innerHTML = data.insights.map(insight =>
-                `<div class="skill-insight">${insight}</div>`
-            ).join('');
-        }
-
         // Mini cards
         document.getElementById('totalPlays').textContent = this.formatNumber(data.totalPlays || 0);
         document.getElementById('totalTime').textContent = this.formatDuration(data.totalMinutes || 0);
-        document.getElementById('avgAcc').textContent = `${(data.avgAccuracy * 100 || 0).toFixed(2)}%`;
+        document.getElementById('avgAcc').textContent = `${((data.avgAccuracy || 0) * 100).toFixed(2)}%`;
         document.getElementById('avgPP').textContent = Math.round(data.avgPP || 0);
-    }
 
-    renderCharts(data) {
-        this.renderActivityChart(data.dailyActivity || []);
-        this.renderPerformanceChart(data.dailyPerformance || []);
-    }
+        // Performance & Form
+        const perfMatchEl = document.getElementById('perfMatch');
+        if (perfMatchEl) perfMatchEl.textContent = `${(data.perfMatch || 0).toFixed(1)}%`;
 
-    renderActivityChart(dailyData) {
-        const ctx = document.getElementById('activityChart')?.getContext('2d');
-        if (!ctx) return;
-
-        if (this.activityChart) {
-            this.activityChart.destroy();
+        const formEl = document.getElementById('currentForm');
+        if (formEl) {
+            formEl.textContent = data.currentForm || 'Stable';
+            formEl.className = 'form-value ' + (data.currentForm || 'stable').toLowerCase();
         }
 
-        const labels = dailyData.map(d => d.date);
-        const plays = dailyData.map(d => d.plays);
-        const time = dailyData.map(d => d.minutes);
-
-        this.activityChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: 'Plays',
-                        data: plays,
-                        backgroundColor: 'rgba(187, 136, 255, 0.6)',
-                        borderColor: '#BB88FF',
-                        borderWidth: 1,
-                        yAxisID: 'y'
-                    },
-                    {
-                        label: 'Minutes',
-                        data: time,
-                        type: 'line',
-                        borderColor: '#00FF88',
-                        backgroundColor: 'transparent',
-                        tension: 0.3,
-                        yAxisID: 'y1'
-                    }
-                ]
-            },
-            options: this.getChartOptions('Plays', 'Minutes')
-        });
+        const mentalityValEl = document.getElementById('mentalityValue');
+        const mentalityFillEl = document.getElementById('mentalityFill');
+        if (mentalityValEl && mentalityFillEl) {
+            const m = Math.round(data.mentality ?? 0);
+            mentalityValEl.textContent = `${m}%`;
+            mentalityFillEl.style.width = `${m}%`;
+        }
     }
 
-    renderPerformanceChart(dailyData) {
-        const ctx = document.getElementById('performanceChart')?.getContext('2d');
-        if (!ctx) return;
+    renderMainChart() {
+        const ctx = document.getElementById('mainAnalyticsChart')?.getContext('2d');
+        if (!ctx || !this.rawData) return;
 
-        if (this.performanceChart) {
-            this.performanceChart.destroy();
+        if (this.mainChart) {
+            this.mainChart.destroy();
         }
 
+        const dailyData = this.rawData.dailyActivity || [];
         const labels = dailyData.map(d => d.date);
-        const values = dailyData.map(d => d.match);
+        
+        let datasets = [];
 
-        this.performanceChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Performance Match',
-                    data: values,
+        switch (this.currentMetric) {
+            case 'pp':
+                datasets.push({
+                    label: 'Avg PP',
+                    data: dailyData.map(d => d.avgPP),
+                    borderColor: '#BB88FF',
+                    backgroundColor: 'rgba(187, 136, 255, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                });
+                break;
+            case 'performance':
+                datasets.push({
+                    label: 'Performance Match (%)',
+                    data: this.rawData.dailyPerformance.map(d => d.match),
                     borderColor: '#FF66AB',
                     backgroundColor: 'rgba(255, 102, 171, 0.1)',
                     fill: true,
-                    tension: 0.3
-                }]
+                    tension: 0.4
+                });
+                break;
+            case 'activity':
+                datasets.push({
+                    label: 'Plays',
+                    data: dailyData.map(d => d.plays),
+                    borderColor: '#00F2FE',
+                    backgroundColor: 'rgba(0, 242, 254, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    yAxisID: 'y'
+                });
+                datasets.push({
+                    label: 'Minutes',
+                    data: dailyData.map(d => d.minutes),
+                    borderColor: '#f2fe00',
+                    backgroundColor: 'transparent',
+                    borderDash: [5, 5],
+                    tension: 0.4,
+                    yAxisID: 'y1'
+                });
+                break;
+            case 'accuracy':
+                datasets.push({
+                    label: 'Accuracy (%)',
+                    data: dailyData.map(d => d.avgAcc), 
+                    borderColor: '#00FF88',
+                    backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                });
+                break;
+        }
+
+        this.mainChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: datasets
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { display: false }
+                    legend: { 
+                        display: this.currentMetric === 'activity',
+                        position: 'top',
+                        align: 'end',
+                        labels: { color: '#888', boxWidth: 12, font: { size: 10 } }
+                    }
                 },
                 scales: {
                     x: {
-                        grid: { color: '#222' },
-                        ticks: { color: '#666' }
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#666', maxTicksLimit: 10 }
                     },
                     y: {
-                        grid: { color: '#222' },
-                        ticks: { color: '#666' },
-                        min: 0,
-                        max: 100
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#888' }
+                    },
+                    y1: {
+                        display: this.currentMetric === 'activity',
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        ticks: { color: '#888' }
                     }
                 }
             }
         });
-    }
-
-    getChartOptions(leftLabel, rightLabel) {
-        return {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false
-            },
-            plugins: {
-                legend: {
-                    display: true,
-                    labels: { color: '#888' }
-                }
-            },
-            scales: {
-                x: {
-                    grid: { color: '#222' },
-                    ticks: { color: '#666' }
-                },
-                y: {
-                    type: 'linear',
-                    position: 'left',
-                    grid: { color: '#222' },
-                    ticks: { color: '#BB88FF' },
-                    title: {
-                        display: true,
-                        text: leftLabel,
-                        color: '#BB88FF'
-                    }
-                },
-                y1: {
-                    type: 'linear',
-                    position: 'right',
-                    grid: { drawOnChartArea: false },
-                    ticks: { color: '#00FF88' },
-                    title: {
-                        display: true,
-                        text: rightLabel,
-                        color: '#00FF88'
-                    }
-                }
-            }
-        };
     }
 
     formatNumber(num) {
@@ -199,7 +200,7 @@ class AnalyticsModule {
             const hours = Math.floor(minutes / 60);
             return `${hours}h`;
         }
-        return `${minutes}m`;
+        return `${Math.round(minutes)}m`;
     }
 }
 

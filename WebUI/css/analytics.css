@@ -45,7 +45,14 @@
     font-weight: 900;
     color: white;
     margin-bottom: 4px;
+    text-transform: uppercase;
 }
+
+.form-value.peak { color: #f2fe00; text-shadow: 0 0 10px rgba(242, 254, 0, 0.5); }
+.form-value.improving { color: #00f2fe; text-shadow: 0 0 10px rgba(0, 242, 254, 0.5); }
+.form-value.stable { color: #fff; }
+.form-value.fatigued { color: #ffae00; }
+.form-value.slumping { color: #ff4d4d; }
 
 .skill-insights {
     display: flex;
@@ -128,10 +135,45 @@
     min-height: 280px;
 }
 
-.chart-title {
-    font-size: 12px;
-    font-weight: 900;
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 16px;
+}
+
+.metric-selector,
+.period-selector {
+    display: flex;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.p-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 800;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.p-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.p-btn.active {
+    background: var(--accent-gradient);
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(0, 242, 254, 0.3);
 }
 
 .chart-container {

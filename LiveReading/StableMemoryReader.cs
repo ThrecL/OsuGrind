@@ -393,8 +393,12 @@ namespace OsuGrind.LiveReading
                                         {
                                             snapshot.LiveHP = _scanner.ReadDouble(IntPtr.Add(hpBase, 0x1C));
                                             if (snapshot.LiveHP > 0.01) _hasSeenHealth = true;
-                                            snapshot.Failed = _hasSeenHealth && snapshot.LiveHP <= 0.0001;
+                                            
+                                            bool healthZero = snapshot.LiveHP <= 0.0001;
+                                            bool noFail = snapshot.ModsList != null && snapshot.ModsList.Contains("NF");
+                                            snapshot.Failed = _hasSeenHealth && healthZero && !noFail;
                                         }
+
                                     }
                                 }
                             }

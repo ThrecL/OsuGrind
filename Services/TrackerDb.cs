@@ -132,10 +132,10 @@ public class TrackerDb
         using var conn = Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-        INSERT INTO plays (score_id, created_at_utc, outcome, duration_ms, beatmap, beatmap_hash, mods, stars, accuracy, score, combo, count300, count100, count50, misses, pp, rank, hit_offsets, timeline, pp_timeline, aim_offsets, cursor_offsets, ur, replay_file, replay_hash, map_path)
+        INSERT OR IGNORE INTO plays (score_id, created_at_utc, outcome, duration_ms, beatmap, beatmap_hash, mods, stars, accuracy, score, combo, count300, count100, count50, misses, pp, rank, hit_offsets, timeline, pp_timeline, aim_offsets, cursor_offsets, ur, replay_file, replay_hash, map_path)
         VALUES ($score_id, $created_at_utc, $outcome, $duration_ms, $beatmap, $beatmap_hash, $mods, $stars, $accuracy, $score, $combo, $count300, $count100, $count50, $misses, $pp, $rank, $hit_offsets, $timeline, $pp_timeline, $aim_offsets, $cursor_offsets, $ur, $replay_file, $replay_hash, $map_path);
-
         """;
+
         cmd.Parameters.AddWithValue("$score_id", row.ScoreId);
         cmd.Parameters.AddWithValue("$created_at_utc", row.CreatedAtUtc.ToString("O", CultureInfo.InvariantCulture));
         cmd.Parameters.AddWithValue("$outcome", row.Outcome);
@@ -288,20 +288,53 @@ public class TrackerDb
         return new DailyAverageStats(0, 0);
     }
 
+    public async Task<AnalyticsSummary> GetAnalyticsSummaryAsync(int days)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        string timeFilter = days > 0 ? "WHERE created_at_utc >= datetime('now', $offset)" : "";
+        cmd.CommandText = $"""
+            SELECT 
+                COUNT(1),
+                SUM(duration_ms),
+                AVG(pp),
+                AVG(accuracy)
+            FROM plays 
+            {timeFilter}
+        """;
+        if (days > 0) cmd.Parameters.AddWithValue("$offset", $"-{days} days");
+
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            return new AnalyticsSummary(
+                reader.IsDBNull(0) ? 0 : reader.GetInt32(0),
+                reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
+                reader.IsDBNull(2) ? 0 : reader.GetDouble(2),
+                reader.IsDBNull(3) ? 0 : reader.GetDouble(3)
+            );
+        }
+        return new AnalyticsSummary(0, 0, 0, 0);
+    }
+
     public async Task<List<DailyStats>> GetDailyStatsAsync(int days)
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
+        string timeFilter = days > 0 ? "WHERE created_at_utc >= datetime('now', $offset)" : "";
+        cmd.CommandText = $"""
             SELECT date(created_at_utc, 'localtime') as d, 
                    COUNT(1), 
                    SUM(CASE WHEN outcome = 'pass' THEN 1 ELSE 0 END),
-                   SUM(pp)
+                   SUM(pp),
+                   SUM(duration_ms),
+                   SUM(accuracy)
             FROM plays 
-            WHERE created_at_utc >= datetime('now', $offset)
+            {timeFilter}
             GROUP BY d
+            ORDER BY d ASC
         """;
-        cmd.Parameters.AddWithValue("$offset", $"-{days} days");
+        if (days > 0) cmd.Parameters.AddWithValue("$offset", $"-{days} days");
         var list = new List<DailyStats>();
         using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -311,11 +344,14 @@ public class TrackerDb
                 Date = reader.GetString(0),
                 PlayCount = reader.GetInt32(1),
                 PassCount = reader.GetInt32(2),
-                TotalPP = reader.IsDBNull(3) ? 0 : reader.GetDouble(3)
+                TotalPP = reader.IsDBNull(3) ? 0 : reader.GetDouble(3),
+                TotalDurationMs = reader.IsDBNull(4) ? 0 : reader.GetInt64(4),
+                TotalAccuracy = reader.IsDBNull(5) ? 0 : reader.GetDouble(5)
             });
         }
         return list;
     }
+
 
     public async Task MigrateAsync()
     {
@@ -427,9 +463,10 @@ public class TrackerDb
         cmd.Transaction = transaction;
 
         cmd.CommandText = """
-        INSERT INTO plays (score_id, created_at_utc, outcome, duration_ms, beatmap, beatmap_hash, mods, stars, accuracy, score, combo, count300, count100, count50, misses, pp, rank, hit_offsets, timeline, aim_offsets, cursor_offsets, ur, replay_file, replay_hash)
+        INSERT OR IGNORE INTO plays (score_id, created_at_utc, outcome, duration_ms, beatmap, beatmap_hash, mods, stars, accuracy, score, combo, count300, count100, count50, misses, pp, rank, hit_offsets, timeline, aim_offsets, cursor_offsets, ur, replay_file, replay_hash)
         VALUES ($score_id, $created_at_utc, $outcome, $duration_ms, $beatmap, $beatmap_hash, $mods, $stars, $accuracy, $score, $combo, $count300, $count100, $count50, $misses, $pp, $rank, $hit_offsets, $timeline, $aim_offsets, $cursor_offsets, $ur, $replay_file, $replay_hash);
         """;
+
 
         var pScoreId = cmd.Parameters.Add("$score_id", SqliteType.Integer);
         var pCreated = cmd.Parameters.Add("$created_at_utc", SqliteType.Text);
@@ -613,6 +650,26 @@ public class TrackerDb
         await cmd.ExecuteNonQueryAsync();
     }
 
+    public async Task DeletePlayAsync(long id)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM plays WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task UpdatePlayNotesAsync(long id, string notes)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE plays SET notes = $notes WHERE id = $id";
+        cmd.Parameters.AddWithValue("$notes", notes);
+        cmd.Parameters.AddWithValue("$id", id);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+
     public async Task DeleteAllBeatmapsAsync()
     {
         using var conn = Open();
@@ -620,14 +677,41 @@ public class TrackerDb
         cmd.CommandText = "DELETE FROM beatmaps";
         await cmd.ExecuteNonQueryAsync();
     }
+
+    public async Task<HashSet<string>> GetExistingScoreSignaturesAsync()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        // Fetch hash, score, date to build unique signature
+        cmd.CommandText = "SELECT beatmap_hash, score, created_at_utc FROM plays";
+        
+        var signatures = new HashSet<string>();
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var hash = reader.IsDBNull(0) ? "" : reader.GetString(0);
+            var score = reader.GetInt64(1);
+            var date = reader.IsDBNull(2) ? "" : reader.GetString(2);
+            signatures.Add($"{hash}|{score}|{date}");
+        }
+        return signatures;
+    }
 }
 
-public record TotalStats(int totalPlays, long totalTimeMs);
-public record DailyAverageStats(double avgDailyAcc, double avgDailyPP);
-public class DailyStats {
-    public string Date { get; set; } = "";
-    public int PlayCount { get; set; }
-    public int PassCount { get; set; }
-    public double TotalPP { get; set; }
-    public double AvgPP => PlayCount > 0 ? TotalPP / PlayCount : 0;
-}
+
+    public record TotalStats(int totalPlays, long totalTimeMs);
+    public record DailyAverageStats(double avgDailyAcc, double avgDailyPP);
+    public record AnalyticsSummary(int TotalPlays, long TotalDurationMs, double AvgPP, double AvgAccuracy);
+    
+    public class DailyStats
+    {
+        public string Date { get; set; } = "";
+        public int PlayCount { get; set; }
+        public int PassCount { get; set; }
+        public double TotalPP { get; set; }
+        public double TotalAccuracy { get; set; }
+        public long TotalDurationMs { get; set; }
+        public double AvgPP => PlayCount > 0 ? TotalPP / PlayCount : 0;
+        public double AvgAcc => PlayCount > 0 ? TotalAccuracy / PlayCount : 0;
+    }
+

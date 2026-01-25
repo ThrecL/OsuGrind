@@ -294,9 +294,10 @@ class HistoryModule {
         // Mods logic
         const mods = score.mods || 'NM';
         const isNoMod = (mods === 'NM' || mods === 'None' || mods === 'NoMod' || mods === 'No Mod');
-        const modList = isNoMod ? [] : (mods.replace('+', '').match(/.{1,2}/g) || []);
+        const modList = isNoMod ? [] : mods.split(',').map(m => m.trim()).filter(m => m !== "");
         
         let modsHtml = "";
+
         if (modList.length > 0) {
             modsHtml = modList.map(m => {
                 const iconName = this.getModIconName(m);
@@ -363,17 +364,22 @@ class HistoryModule {
         if (grade === 'XH') grade = 'SSH';
 
         const mods = score.mods || 'NM';
-        const beatmap = score.beatmap || 'Unknown Map';
-
-        const modList = mods.replace('+', '').match(/.{1,2}/g) || [];
+        // Correct mod parsing (split by comma for imported scores)
+        const modList = (mods === 'NM' || mods === 'None') ? [] : (mods.includes(',') ? mods.split(',').map(m => m.trim()) : mods.replace('+', '').match(/.{1,2}/g) || []);
+        
         const modsHtml = modList.length ? modList.map(m => {
+            // Fix mod naming for Lazer imports
+            if (m === 'D') m = 'HD';
+            if (m === 'CN') m = 'NC';
+            
             const iconName = this.getModIconName(m);
-            // High quality HD mod from rewind folder
-            const isHD = m.toUpperCase() === 'HD';
-            const src = isHD ? 'rewind/mod-hidden.png' : `Assets/mods/${iconName}.png`;
-            const style = isHD ? 'filter: grayscale(0%); width: 32px;' : '';
-            return `<img class="mod-icon" src="${src}" alt="${m}" title="${m}" style="${style}" onerror="this.src='Assets/mods/mod-no-mod.png'">`;
-        }).join('') : '';
+            const isHD = m === 'HD' || m === 'Hidden';
+            const src = `Assets/Mods/${iconName}.png`;
+            // Special styling for HD if needed
+            const style = isHD ? 'opacity: 0.8; width: 32px;' : 'width: 32px;'; 
+            return `<img class="mod-icon" src="${src}" alt="${m}" title="${m}" style="${style}" onerror="this.src='Assets/Mods/mod-no-mod.png'">`;
+        }).join('') : `<img class="mod-icon" src="Assets/Mods/mod-no-mod.png" alt="NM" title="No Mod" style="width: 32px;">`;
+
 
         const modal = document.createElement('div');
         modal.className = 'score-analysis-modal';
@@ -646,8 +652,32 @@ class HistoryModule {
                                     .MuiBox-root:has(> .MuiTypography-root:contains("Skin Source")) {
                                         display: none !important;
                                     }
+
+                                    /* HIDE PP FOR IMPORTED PLAYS */
+                                    ${info.isImported ? `
+                                    .MuiBox-root:has(> .MuiTypography-root:contains("PP")),
+                                    .MuiBox-root:has(> .MuiTypography-root:contains("pp")),
+                                    .MuiBox-root:has(> .MuiTypography-root:contains("Performance")) {
+                                        display: none !important;
+                                    }
+                                    /* Hide our custom PP overlay element if present */
+                                    #analysis-pp, .pp-stat { 
+                                        display: none !important; 
+                                        visibility: hidden !important; 
+                                        opacity: 0 !important; 
+                                        pointer-events: none !important;
+                                    }
+                                    ` : ''}
                                 `;
                                 rewindFrame.contentDocument.head.appendChild(style);
+
+                                // If this is an imported play, also hide the main document's PP stat immediately
+                                if (info.isImported) {
+                                    const ppStat = modal.querySelector('.pp-stat');
+                                    const ppVal = modal.querySelector('#analysis-pp');
+                                    if (ppStat) ppStat.style.display = 'none';
+                                    if (ppVal) ppVal.style.display = 'none';
+                                }
 
                                 // Advanced UI Cleaning: MutationObserver to hide unwanted skins in real-time
                                 const observer = new MutationObserver((mutations) => {

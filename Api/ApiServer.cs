@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using OsuGrind.Services;
+using OsuGrind.Import;
 using OsuParsers.Decoders;
 using OsuParsers.Enums;
 using OsuParsers.Replays;
@@ -41,6 +42,13 @@ public class ApiServer : IDisposable
         _listener = new HttpListener();
         _listener.Prefixes.Add($"http://localhost:{Port}/");
         _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
+        
+        // Listen on port 7777 for OAuth callback
+        if (port != 7777)
+        {
+            _listener.Prefixes.Add("http://localhost:7777/");
+            _listener.Prefixes.Add("http://127.0.0.1:7777/");
+        }
 
         RealmExportService.OnLog += async (msg) => await BroadcastLog(msg);
     }
@@ -182,22 +190,99 @@ public class ApiServer : IDisposable
                 } else await SendJson(response, new { error = "Invalid date" }, 400);
                 break;
             case "/api/history/month": await SendJson(response, new { playCounts = await GetMonthPlayCountsAsync(GetQueryInt(context, "year", DateTime.Now.Year), GetQueryInt(context, "month", DateTime.Now.Month)) }); break;
-            case "/api/analytics": await SendJson(response, await GetAnalyticsDataAsync()); break;
-            case "/api/import/lazer": if (method == "POST") { var (added, skipped, error) = await new LazerImportService(_db).ImportScoresAsync(SettingsManager.Current.LazerPath); if (error != null) await SendJson(response, new { success = false, message = error }, 400); else await SendJson(response, new { success = true, count = added, skipped }); } break;
+            case "/api/analytics":
+                var days = GetQueryInt(context, "days", 30);
+                await SendJson(response, await GetAnalyticsDataAsync(days));
+                break;
+            case "/api/import/lazer": 
+                if (method == "POST") { 
+                    var importService = new LazerImportService(_db);
+                    var (added, skipped, error) = await importService.ImportScoresAsync(SettingsManager.Current.LazerPath, SettingsManager.Current.Username); 
+                    if (error != null) { DebugService.Log($"[LazerImport] Failed: {error}", "ApiServer"); await SendJson(response, new { success = false, message = error }, 400); }
+                    else await SendJson(response, new { success = true, count = added, skipped }); 
+                } 
+                break;
+            case "/api/import/stable":
+                if (method == "POST") {
+                    var importService = new OsuStableImportService(_db);
+                    var aliases = context.Request.QueryString["aliases"];
+                    var (added, skipped, error) = await importService.ImportScoresAsync(SettingsManager.Current.StablePath, SettingsManager.Current.Username, aliases);
+                    if (!string.IsNullOrEmpty(error)) { DebugService.Log($"[StableImport] Failed: {error}", "ApiServer"); await SendJson(response, new { success = false, message = error }, 400); }
+                    else await SendJson(response, new { success = true, count = added, skipped });
+                }
+                break;
             case "/api/settings":
                 if (method == "GET") await SendJson(response, SettingsManager.Current);
                 else if (method == "POST") { var payload = await ReadJsonBodyAsync<Dictionary<string, object>>(context.Request); if (payload != null) { SettingsManager.UpdateFromDictionary(payload); await SendJson(response, new { success = true }); } else await SendJson(response, new { error = "Invalid settings" }, 400); }
+                break;
+            case "/api/settings/delete-scores":
+                if (method == "POST") { await _db.DeleteAllScoresAsync(); await SendJson(response, new { success = true }); }
+                break;
+            case "/api/settings/delete-beatmaps":
+                if (method == "POST") { await _db.DeleteAllBeatmapsAsync(); await SendJson(response, new { success = true }); }
+                break;
+            case "/api/data/delete-zero":
+                if (method == "POST") { 
+                    using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OsuGrind", "osugrind.sqlite")}");
+                    conn.Open();
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "DELETE FROM plays WHERE score = 0";
+                    await cmd.ExecuteNonQueryAsync();
+                    await SendJson(response, new { success = true }); 
+                }
+                break;
+            case "/api/auth/login":
+                await SendJson(response, new { authUrl = _authService.GetAuthUrl() });
+                break;
+            case "/api/auth/logout":
+                SettingsManager.Current.AccessToken = null; SettingsManager.Save(); await SendJson(response, new { success = true });
+                break;
+            case "/callback":
+                var code = context.Request.QueryString["code"];
+                if (!string.IsNullOrEmpty(code)) {
+                    var authToken = await _authService.ExchangeCodeForTokenAsync(code);
+                    if (!string.IsNullOrEmpty(authToken)) {
+                        SettingsManager.Current.AccessToken = authToken; SettingsManager.Save();
+                        var html = "<html><body style='background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:50px;'><h1>Login Successful!</h1><p>You can close this window now.</p><script>setTimeout(() => { window.location.href = 'http://localhost:" + Port + "/'; }, 1000);</script></body></html>";
+                        var b = Encoding.UTF8.GetBytes(html); response.ContentType = "text/html"; await response.OutputStream.WriteAsync(b, 0, b.Length); response.Close(); return;
+                    }
+                }
+                await SendJson(response, new { error = "Auth failed" }, 400);
                 break;
             case "/api/profile":
                 string? token = SettingsManager.Current.AccessToken;
                 if (!string.IsNullOrEmpty(token)) {
                     var profile = await _authService.GetUserProfileAsync(token);
-                    if (profile != null) { await SendJson(response, new { isLoggedIn = true, username = profile.Value.TryGetProperty("username", out var un) ? un.GetString() : null, avatarUrl = profile.Value.TryGetProperty("avatar_url", out var av) ? av.GetString() : null }); return; }
+                    if (profile != null) { 
+                        var p = profile.Value;
+                        double pp = 0; double acc = 0; int pc = 0; int gr = 0; int cr = 0; int mc = 0;
+                        if (p.TryGetProperty("statistics", out var stats)) {
+                            if (stats.TryGetProperty("pp", out var ppP)) pp = ppP.GetDouble();
+                            if (stats.TryGetProperty("hit_accuracy", out var acP)) acc = acP.GetDouble();
+                            if (stats.TryGetProperty("play_count", out var pcP)) pc = pcP.GetInt32();
+                            if (stats.TryGetProperty("global_rank", out var grP) && grP.ValueKind != JsonValueKind.Null) gr = grP.GetInt32();
+                            if (stats.TryGetProperty("country_rank", out var crP) && crP.ValueKind != JsonValueKind.Null) cr = crP.GetInt32();
+                            if (stats.TryGetProperty("maximum_combo", out var mcP)) mc = mcP.GetInt32();
+                        }
+                        var username = p.TryGetProperty("username", out var un) ? un.GetString() : null;
+                        if (!string.IsNullOrEmpty(username)) { SettingsManager.Current.Username = username; SettingsManager.Current.PeakPP = Math.Max(SettingsManager.Current.PeakPP, pp); SettingsManager.Save(); }
+                        await SendJson(response, new { isLoggedIn = true, username, avatarUrl = p.TryGetProperty("avatar_url", out var av) ? av.GetString() : null, coverUrl = p.TryGetProperty("cover", out var cov) && cov.TryGetProperty("url", out var curl) ? curl.GetString() : null, globalRank = gr, countryRank = cr, pp, accuracy = acc, playCount = pc, maxCombo = mc }); 
+                        return; 
+                    }
                 }
                 await SendJson(response, new { isLoggedIn = false });
                 break;
             default:
-                if (path.StartsWith("/api/play/") && path.EndsWith("/rewind")) await HandleRewindRequest(context, ExtractIdFromPath(path, "/api/play/"));
+                if (path.StartsWith("/api/play/")) {
+                    var id = ExtractIdFromPath(path, "/api/play/");
+                    if (method == "DELETE") { await _db.DeletePlayAsync(id); await SendJson(response, new { success = true }); }
+                    else if (path.EndsWith("/notes") && method == "POST") {
+                        var payload = await ReadJsonBodyAsync<Dictionary<string, string>>(context.Request);
+                        if (payload != null && payload.TryGetValue("notes", out var notes)) { await _db.UpdatePlayNotesAsync(id, notes); await SendJson(response, new { success = true }); }
+                        else await SendJson(response, new { error = "Invalid notes" }, 400);
+                    }
+                    else if (path.EndsWith("/rewind")) await HandleRewindRequest(context, id);
+                }
                 else if (path.StartsWith("/api/rewind/osr")) await HandleRewindOsr(context);
                 else if (path == "/rewind/file") await HandleRewindFile(context);
                 else if (path.StartsWith("/api/rewind/skins")) await HandleRewindSkins(context);
@@ -215,10 +300,60 @@ public class ApiServer : IDisposable
         }
     }
 
-    private async Task<object> GetAnalyticsDataAsync() { var t = await _db.GetTotalStatsAsync(); var d = await _db.GetDailyAverageStatsAsync(); var s = await _db.GetDailyStatsAsync(30); double m = s.Any() ? s.Max(x => x.AvgPP) : 1; return new { totalPlays = t.totalPlays, totalMinutes = t.totalTimeMs / 60000.0, avgAccuracy = d.avgDailyAcc, avgPP = d.avgDailyPP, performanceMatch = m > 0 ? (d.avgDailyPP / m) * 100.0 : 0 }; }
+    private async Task<object> GetAnalyticsDataAsync(int days)
+    {
+        var summary = await _db.GetAnalyticsSummaryAsync(days);
+        var daily = await _db.GetDailyStatsAsync(days);
+        
+        var recentSummary = await _db.GetAnalyticsSummaryAsync(7);
+        var baselineSummary = await _db.GetAnalyticsSummaryAsync(30);
+        
+        string form = "No Data";
+        if (summary.TotalPlays > 0)
+        {
+            form = "Stable";
+            if (recentSummary.AvgPP > baselineSummary.AvgPP * 1.05) form = "Peak";
+            else if (recentSummary.AvgPP > baselineSummary.AvgPP * 1.01) form = "Improving";
+            else if (recentSummary.AvgPP < baselineSummary.AvgPP * 0.95) form = "Slumping";
+            else if (recentSummary.AvgPP < baselineSummary.AvgPP * 0.99) form = "Fatigued";
+        }
+
+        double mentality = 0; 
+        if (summary.TotalPlays > 0)
+        {
+            double passRate = (double)daily.Sum(d => d.PassCount) / summary.TotalPlays;
+            mentality = (passRate * 60.0) + (summary.AvgAccuracy * 40.0);
+        }
+
+        double peakPP = SettingsManager.Current.PeakPP;
+        if (peakPP <= 0) peakPP = daily.Any() ? daily.Max(d => d.AvgPP) : 1;
+        if (peakPP <= 0) peakPP = 1;
+
+        return new {
+            totalPlays = summary.TotalPlays,
+            totalMinutes = summary.TotalDurationMs / 60000.0,
+            avgAccuracy = summary.AvgAccuracy,
+            avgPP = summary.AvgPP,
+            perfMatch = summary.TotalPlays > 0 ? (summary.AvgPP / peakPP) * 100.0 : 0,
+            currentForm = form,
+            mentality = Math.Clamp(mentality, 0, 100),
+            dailyActivity = daily.Select(d => new {
+                date = d.Date,
+                plays = d.PlayCount,
+                minutes = d.TotalDurationMs / 60000.0,
+                avgPP = d.AvgPP,
+                avgAcc = d.AvgAcc * 100.0
+            }),
+            dailyPerformance = daily.Select(d => new {
+                date = d.Date,
+                match = (d.AvgPP / peakPP) * 100.0
+            })
+        };
+    }
+
     private async Task<Dictionary<string, int>> GetMonthPlayCountsAsync(int y, int m) { var p = await _db.FetchPlaysRangeAsync(new DateTime(y, m, 1).ToUniversalTime(), new DateTime(y, m, 1).AddMonths(1).ToUniversalTime()); return p.GroupBy(x => x.CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd")).ToDictionary(g => g.Key, g => g.Count()); }
     private async Task ServeStaticFile(HttpListenerContext context, string path) { if (path == "/") path = "/index.html"; var local = ResolveStaticPath(path); if (File.Exists(local)) { context.Response.Headers["Cache-Control"] = "no-store"; var buf = await File.ReadAllBytesAsync(local); context.Response.ContentType = GetContentType(Path.GetExtension(local)); await context.Response.OutputStream.WriteAsync(buf, 0, buf.Length); context.Response.Close(); } else await SendJson(context.Response, new { error = "Not found" }, 404); }
-    private string ResolveStaticPath(string path) { var rel = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar); var p = Path.Combine(_webRoot, rel); if (File.Exists(p)) return p; if (rel.Equals("favicon.ico", StringComparison.OrdinalIgnoreCase)) return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "favicon.ico"); if (rel.StartsWith("assets" + Path.DirectorySeparatorChar + "mods")) return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Assets", "Mods", rel.Substring(12)); return p; }
+    private string ResolveStaticPath(string path) { var rel = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar); var p = Path.Combine(_webRoot, rel); if (File.Exists(p)) return p; if (rel.Equals("favicon.ico", StringComparison.OrdinalIgnoreCase)) return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "WebUI", "rewind", "favicon.ico"); if (rel.StartsWith("assets" + Path.DirectorySeparatorChar + "mods")) return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Assets", "Mods", rel.Substring(12)); return p; }
     private async Task HandleWebSocket(HttpListenerContext context) { var ws = (await context.AcceptWebSocketAsync(null)).WebSocket; lock (_clientsLock) _liveClients.Add(ws); try { while (ws.State == WebSocketState.Open) await ws.ReceiveAsync(new ArraySegment<byte>(new byte[1024]), _cts.Token); } finally { lock (_clientsLock) _liveClients.Remove(ws); } }
     public async Task BroadcastLog(string message, string level = "info") => await Broadcast(JsonSerializer.Serialize(new { type = "log", message, level }));
     public async Task BroadcastLiveData(object data) => await Broadcast(JsonSerializer.Serialize(new { type = "live", data }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
@@ -233,116 +368,53 @@ public class ApiServer : IDisposable
 
     private async Task HandleRewindRequest(HttpListenerContext context, int id)
     {
-        var play = await _db.GetPlayAsync(id);
-        if (play == null) { await SendJson(context.Response, new { error = "Play not found" }, 404); return; }
-
-        string? replayPath = play.ReplayFile;
-        if (string.IsNullOrEmpty(replayPath) || !File.Exists(replayPath))
-        {
-            if (!string.IsNullOrEmpty(play.ReplayHash)) replayPath = ExtractReplayFromLazer(play.ReplayHash, play.CreatedAtUtc.Ticks);
-        }
-
-        if (string.IsNullOrEmpty(replayPath))
-        {
-            replayPath = await new RealmExportService().SearchReplayByTimeAsync(play.CreatedAtUtc, TimeSpan.FromMinutes(5), play.BeatmapHash);
-            if (!string.IsNullOrEmpty(replayPath))
-            {
-                await _db.UpdatePlayReplayFileAsync(id, replayPath);
-                play.ReplayFile = replayPath;
-            }
-        }
-
-        if (string.IsNullOrEmpty(replayPath) || !File.Exists(replayPath))
-        {
-            string stablePath = SettingsManager.Current.StablePath ?? @"C:\project\osu!";
-            if (!string.IsNullOrEmpty(play.BeatmapHash) && Directory.Exists(stablePath))
-            {
-                var replayDir = Path.Combine(stablePath, "Data", "r");
-                if (Directory.Exists(replayDir))
-                {
-                    var file = new DirectoryInfo(replayDir).GetFiles("*.osr").Where(f => f.Name.StartsWith(play.BeatmapHash, StringComparison.OrdinalIgnoreCase)).OrderByDescending(f => f.LastWriteTime).FirstOrDefault();
-                    if (file != null && (DateTime.UtcNow - file.LastWriteTimeUtc).TotalHours < 24)
-                    {
-                        replayPath = file.FullName;
-                        await _db.UpdatePlayReplayFileAsync(id, replayPath);
-                        play.ReplayFile = replayPath;
-                    }
+        var play = await _db.GetPlayAsync(id); if (play == null) { await SendJson(context.Response, new { error = "Play not found" }, 404); return; }
+        string? replayPath = play.ReplayFile; if (string.IsNullOrEmpty(replayPath) || !File.Exists(replayPath)) if (!string.IsNullOrEmpty(play.ReplayHash)) replayPath = ExtractReplayFromLazer(play.ReplayHash, play.CreatedAtUtc.Ticks);
+        if (string.IsNullOrEmpty(replayPath)) replayPath = await new RealmExportService().SearchReplayByTimeAsync(play.CreatedAtUtc, TimeSpan.FromMinutes(5), play.BeatmapHash);
+        if (string.IsNullOrEmpty(replayPath) || !File.Exists(replayPath)) {
+            string sPath = SettingsManager.Current.StablePath ?? @"C:\project\osu!";
+            if (Directory.Exists(sPath)) {
+                var rDir = Path.Combine(sPath, "Data", "r");
+                if (Directory.Exists(rDir)) {
+                    var f = new DirectoryInfo(rDir).GetFiles("*.osr").Where(x => x.Name.StartsWith(play.BeatmapHash, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.LastWriteTime).FirstOrDefault();
+                    if (f != null && (DateTime.UtcNow - f.LastWriteTimeUtc).TotalHours < 24) replayPath = f.FullName;
                 }
             }
         }
-
         if (string.IsNullOrEmpty(replayPath) || !File.Exists(replayPath)) { await SendJson(context.Response, new { error = "Replay not found" }, 404); return; }
 
         var localReplaysDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Replays");
-        if (!replayPath.StartsWith(localReplaysDir, StringComparison.OrdinalIgnoreCase))
-        {
+        if (!replayPath.StartsWith(localReplaysDir, StringComparison.OrdinalIgnoreCase)) {
             try {
-                Directory.CreateDirectory(localReplaysDir);
-                var fileName = Path.GetFileName(replayPath);
-                if (fileName.EndsWith(".osr") && (replayPath.Contains("Data" + Path.DirectorySeparatorChar + "r") || replayPath.Contains("Data/r"))) fileName = $"Stable_{play.BeatmapHash.Substring(0, 8)}_{play.CreatedAtUtc.Ticks}.osr";
-                var destPath = Path.Combine(localReplaysDir, fileName);
-                if (!File.Exists(destPath)) File.Copy(replayPath, destPath, true);
-                replayPath = destPath;
-                await _db.UpdatePlayReplayFileAsync(id, replayPath);
+                Directory.CreateDirectory(localReplaysDir); var fName = Path.GetFileName(replayPath);
+                if (fName.EndsWith(".osr") && replayPath.Contains("Data" + Path.DirectorySeparatorChar + "r")) fName = $"Stable_{play.BeatmapHash.Substring(0, 8)}_{play.CreatedAtUtc.Ticks}.osr";
+                var dPath = Path.Combine(localReplaysDir, fName); if (!File.Exists(dPath)) File.Copy(replayPath, dPath, true); replayPath = dPath; await _db.UpdatePlayReplayFileAsync(id, replayPath);
             } catch { }
         }
 
-        string? beatmapFolder = null;
-        string? osuFileName = null;
-        if (!string.IsNullOrEmpty(play.BeatmapHash))
-        {
-            var exportService = new RealmExportService();
-            var osuPath = await exportService.ExportBeatmapAsync(play.BeatmapHash);
-            if (!string.IsNullOrEmpty(osuPath))
-            {
-                if (Directory.Exists(osuPath)) {
-                    beatmapFolder = osuPath; 
-                    var osuFiles = Directory.GetFiles(osuPath, "*.osu");
-                    if (osuFiles.Length > 0) osuFileName = Path.GetFileName(osuFiles[0]);
-                }
-                else { beatmapFolder = Path.GetDirectoryName(osuPath); osuFileName = Path.GetFileName(osuPath); }
-            }
-            else if (!string.IsNullOrEmpty(play.MapPath) && File.Exists(play.MapPath))
-            {
+        string? beatmapFolder = null; string? osuFileName = null;
+        if (!string.IsNullOrEmpty(play.BeatmapHash)) {
+            var exportService = new RealmExportService(); var osuPath = await exportService.ExportBeatmapAsync(play.BeatmapHash);
+            if (!string.IsNullOrEmpty(osuPath)) { if (Directory.Exists(osuPath)) { beatmapFolder = osuPath; var osuFiles = Directory.GetFiles(osuPath, "*.osu"); if (osuFiles.Length > 0) osuFileName = Path.GetFileName(osuFiles[0]); } else { beatmapFolder = Path.GetDirectoryName(osuPath); osuFileName = Path.GetFileName(osuPath); } }
+            else if (!string.IsNullOrEmpty(play.MapPath) && File.Exists(play.MapPath)) {
                 try {
-                    var sourceFolder = Path.GetDirectoryName(play.MapPath);
-                    if (!string.IsNullOrEmpty(sourceFolder) && Directory.Exists(sourceFolder))
-                    {
-                        var artist = !string.IsNullOrEmpty(play.Artist) ? play.Artist : play.BeatmapArtist;
-                        var title = !string.IsNullOrEmpty(play.Title) ? play.Title : play.BeatmapTitle;
-                        var folderName = string.Join("_", $"{artist} - {title} ({play.BeatmapHash.Substring(0, 8)})".Split(Path.GetInvalidFileNameChars()));
-                        var destFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Songs", folderName);
-                        if (!Directory.Exists(destFolder)) {
-                            Directory.CreateDirectory(destFolder);
-                            foreach (var file in Directory.GetFiles(sourceFolder)) File.Copy(file, Path.Combine(destFolder, Path.GetFileName(file)), true);
-                        }
-                        beatmapFolder = destFolder; osuFileName = Path.GetFileName(play.MapPath);
+                    var sFolder = Path.GetDirectoryName(play.MapPath);
+                    if (!string.IsNullOrEmpty(sFolder) && Directory.Exists(sFolder)) {
+                        var artist = !string.IsNullOrEmpty(play.Artist) ? play.Artist : play.BeatmapArtist; var title = !string.IsNullOrEmpty(play.Title) ? play.Title : play.BeatmapTitle;
+                        var fName = string.Join("_", $"{artist} - {title} ({play.BeatmapHash.Substring(0, 8)})".Split(Path.GetInvalidFileNameChars()));
+                        var dFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Songs", fName);
+                        if (!Directory.Exists(dFolder)) { Directory.CreateDirectory(dFolder); foreach (var file in Directory.GetFiles(sFolder)) File.Copy(file, Path.Combine(dFolder, Path.GetFileName(file)), true); }
+                        beatmapFolder = dFolder; osuFileName = Path.GetFileName(play.MapPath);
                     }
                 } catch { }
             }
         }
-
-        if (!string.IsNullOrEmpty(beatmapFolder) && Directory.Exists(beatmapFolder))
-        {
+        if (!string.IsNullOrEmpty(beatmapFolder) && Directory.Exists(beatmapFolder)) {
             var osuFiles = Directory.GetFiles(beatmapFolder, "*.osu").Select(Path.GetFileName).ToList();
-            if (osuFiles.Count > 0)
-            {
-                if (!string.IsNullOrWhiteSpace(play.Difficulty)) osuFileName = FindOsuFileForDifficulty(osuFiles, play.Difficulty) ?? osuFiles.FirstOrDefault();
-                else osuFileName ??= osuFiles.FirstOrDefault();
-            }
+            if (osuFiles.Count > 0) { if (!string.IsNullOrWhiteSpace(play.Difficulty)) osuFileName = FindOsuFileForDifficulty(osuFiles, play.Difficulty) ?? osuFiles.FirstOrDefault(); else osuFileName ??= osuFiles.FirstOrDefault(); }
         }
-
         var timeline = await _db.GetPpTimelineAsync(play.Id);
-        await SendJson(context.Response, new { replayPath, songsRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Songs"), skinsRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Skins"), beatmapFolder, osuFileName, mods = play.Mods ?? "", beatmapHash = play.BeatmapHash ?? "", replaysRoot = Path.GetDirectoryName(replayPath) ?? "", statsTimeline = timeline });
-    }
-
-    private static string? FindOsuFileForDifficulty(IEnumerable<string?> files, string difficulty)
-    {
-        var target = $"[{difficulty.Trim()}]";
-        var match = files.FirstOrDefault(n => n?.Contains(target, StringComparison.OrdinalIgnoreCase) == true);
-        if (match != null) return match;
-        var norm = difficulty.Replace(" ", "").Trim();
-        return files.FirstOrDefault(n => n?.Replace(" ", "").Contains(norm, StringComparison.OrdinalIgnoreCase) == true);
+        await SendJson(context.Response, new { replayPath, songsRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Songs"), skinsRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Skins"), beatmapFolder, osuFileName, mods = play.Mods ?? "", beatmapHash = play.BeatmapHash ?? "", replaysRoot = Path.GetDirectoryName(replayPath) ?? "", statsTimeline = timeline, isImported = (play.Notes != null && play.Notes.Contains("Imported")) || !string.IsNullOrEmpty(play.ReplayHash) });
     }
 
     private async Task HandleCursorOffsets(HttpListenerContext context) { var payload = await ReadJsonBodyAsync<Dictionary<string, object>>(context.Request); if (payload != null && payload.TryGetValue("scoreId", out var sId) && payload.TryGetValue("offsets", out var off)) { await _db.UpdateCursorOffsetsAsync(long.Parse(sId!.ToString()!), JsonSerializer.Serialize(off)); await SendJson(context.Response, new { success = true }); } else await SendJson(context.Response, new { error = "Invalid payload" }, 400); }
@@ -355,41 +427,7 @@ public class ApiServer : IDisposable
         else if (Directory.Exists(fP)) { context.Response.StatusCode = 200; context.Response.Close(); }
         else await SendJson(context.Response, new { error = "Not found", path = fP }, 404); 
     }
-    private async Task ServeStableBackground(HttpListenerContext context, string p)
-    {
-        if (File.Exists(p))
-        {
-            context.Response.ContentType = GetContentType(Path.GetExtension(p).ToLowerInvariant());
-            var buf = await File.ReadAllBytesAsync(p);
-            await context.Response.OutputStream.WriteAsync(buf, 0, buf.Length);
-            context.Response.Close();
-        }
-        else
-        {
-            // Try to find the file if the drive letter is wrong (e.g. moved installation)
-            // This is common if the DB has old paths "E:\osu!..." but now it's "C:\osu!..."
-            // We can try to re-resolve relative to the current StablePath setting
-            var fileName = Path.GetFileName(p);
-            var folderName = Path.GetFileName(Path.GetDirectoryName(p));
-            
-            var stablePath = SettingsManager.Current.StablePath;
-            if (!string.IsNullOrEmpty(stablePath))
-            {
-                // Try: Stable/Songs/FolderName/FileName
-                var candidate = Path.Combine(stablePath, "Songs", folderName ?? "", fileName);
-                if (File.Exists(candidate))
-                {
-                    context.Response.ContentType = GetContentType(Path.GetExtension(candidate).ToLowerInvariant());
-                    var buf = await File.ReadAllBytesAsync(candidate);
-                    await context.Response.OutputStream.WriteAsync(buf, 0, buf.Length);
-                    context.Response.Close();
-                    return;
-                }
-            }
-            
-            await SendJson(context.Response, new { error = "File not found" }, 404);
-        }
-    }
+    private async Task ServeStableBackground(HttpListenerContext context, string p) { if (File.Exists(p)) { context.Response.ContentType = GetContentType(Path.GetExtension(p).ToLowerInvariant()); var buf = await File.ReadAllBytesAsync(p); await context.Response.OutputStream.WriteAsync(buf, 0, buf.Length); context.Response.Close(); } else await SendJson(context.Response, new { error = "File not found" }, 404); }
     private async Task ServeBackground(HttpListenerContext context, string id) { var lP = SettingsManager.Current.LazerPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu"); var p = Path.Combine(lP, "files", id.Substring(0, 1), id.Substring(0, 2), id); if (File.Exists(p)) { context.Response.ContentType = GetContentType(Path.GetExtension(p).ToLowerInvariant()); var buf = await File.ReadAllBytesAsync(p); await context.Response.OutputStream.WriteAsync(buf, 0, buf.Length); context.Response.Close(); } else await SendJson(context.Response, new { error = "Not found" }, 404); }
     private async Task HandleRewindSkins(HttpListenerContext context) { await SendJson(context.Response, new { skins = new[] { "-Fun3cL" } }); }
     
@@ -495,5 +533,14 @@ public class ApiServer : IDisposable
     }
 
     private string? ExtractReplayFromLazer(string h, long t) { try { var lP = SettingsManager.Current.LazerPath; var sP = Path.Combine(lP ?? "", "files", h.Substring(0, 1), h.Substring(0, 2), h); if (File.Exists(sP)) { var rD = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Replays"); Directory.CreateDirectory(rD); string dP = Path.Combine(rD, $"{t}_{h}.osr"); if (!File.Exists(dP)) File.Copy(sP, dP, true); return dP; } } catch { } return null; }
+    private static string? FindOsuFileForDifficulty(IEnumerable<string?> files, string difficulty)
+    {
+        var target = $"[{difficulty.Trim()}]";
+        var match = files.FirstOrDefault(n => n?.Contains(target, StringComparison.OrdinalIgnoreCase) == true);
+        if (match != null) return match;
+        var norm = difficulty.Replace(" ", "").Trim();
+        return files.FirstOrDefault(n => n?.Replace(" ", "").Contains(norm, StringComparison.OrdinalIgnoreCase) == true);
+    }
+
     public void Dispose() { Stop(); _cts.Dispose(); }
 }
