@@ -207,12 +207,26 @@ class HistoryModule {
     renderMapCard(song) {
         const difficulties = Object.values(song.difficulties);
         difficulties.sort((a, b) => (b.stars || 0) - (a.stars || 0));
-        const bgUrl = song.backgroundPath ? `/api/background/${song.backgroundPath.split(/[/\\]/).pop()}` : '';
+        
+        // FIX: Use the exact same logic as live.js to handle stable paths
+        let bgUrl = '';
+        if (song.backgroundPath) {
+            if (song.backgroundPath.includes('STABLE:')) {
+                const parts = song.backgroundPath.split('STABLE:');
+                // The part after STABLE: is already the base64 encoded path from C#
+                bgUrl = `/api/background/stable?path=${encodeURIComponent(parts[1])}`;
+            } else {
+                // Lazer hash or simple path
+                bgUrl = `/api/background/${song.backgroundPath.replace(/\\/g, '/')}`;
+            }
+        }
 
         return `
             <div class="map-card">
                 <div class="map-header">
                     <div class="map-header-bg" style="background-image: url('${bgUrl}')"></div>
+
+
                     <div class="map-header-overlay"></div>
                     <div class="map-info">
                         <div class="map-title">${song.title}</div>

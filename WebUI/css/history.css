@@ -932,7 +932,8 @@
     padding: 20px;
 }
 
-.hud-top-left { position: absolute; top: 20px; left: 20px; }
+.hud-top-left { position: absolute; top: 120px; left: 20px; }
+
 .hud-top-right { position: absolute; top: 20px; right: 20px; text-align: right; }
 .hud-bottom-left { position: absolute; bottom: 85px; left: 20px; }
 .hud-bottom-right { position: absolute; bottom: 85px; right: 20px; }
