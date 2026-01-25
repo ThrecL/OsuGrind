@@ -677,41 +677,31 @@ class HistoryModule {
                                     subtree: true
                                 });
 
-                                // FIX: Effects Volume slider responsiveness (Seeking)
-                                const fixSlider = () => {
-                                    const labels = rewindFrame.contentDocument.querySelectorAll('.MuiTypography-root');
-                                    labels.forEach(label => {
-                                        if (label.textContent === 'Effects Volume') {
-                                            const slider = label.nextElementSibling;
-                                            if (slider && slider.classList.contains('MuiSlider-root') && !slider._fixed) {
-                                                slider._fixed = true;
-                                                
-                                                const updateVolume = (e) => {
-                                                    const rect = slider.getBoundingClientRect();
-                                                    const val = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-                                                    if (win.__SKIN_AUDIO_STORE && typeof win.__SKIN_AUDIO_STORE.setVolume === 'function') {
-                                                        win.__SKIN_AUDIO_STORE.setVolume(val);
-                                                    }
-                                                };
+                                // Aggressive Monkey-Patch Poller for Audio Shim
+                                // This ensures that even if the app overwrites the store, we reinject setVolume
+                                const shimInterval = win.setInterval(() => {
+                                    if (!win.__SKIN_AUDIO_STORE) {
+                                        win.__SKIN_AUDIO_STORE = {};
+                                    }
+                                    
+                                    if (typeof win.__SKIN_AUDIO_STORE.setVolume !== 'function') {
+                                        win.__SKIN_AUDIO_STORE.setVolume = (v) => { 
+                                            // console.log('[RewindShim] setVolume shim called', v); 
+                                        };
+                                        // console.log('[Rewind] Re-injected setVolume shim');
+                                    }
+                                    
+                                    if (typeof win.__SKIN_AUDIO_STORE.play !== 'function') {
+                                        win.__SKIN_AUDIO_STORE.play = (id) => {};
+                                    }
+                                    
+                                    if (typeof win.__SKIN_AUDIO_STORE.load !== 'function') {
+                                        win.__SKIN_AUDIO_STORE.load = (id, url) => {};
+                                    }
+                                }, 50); // Check every 50ms
 
-                                                slider.addEventListener('mousedown', (e) => {
-                                                    updateVolume(e);
-                                                    const moveHandler = (me) => updateVolume(me);
-                                                    const upHandler = () => {
-                                                        win.removeEventListener('mousemove', moveHandler);
-                                                        win.removeEventListener('mouseup', upHandler);
-                                                    };
-                                                    win.addEventListener('mousemove', moveHandler);
-                                                    win.addEventListener('mouseup', upHandler);
-                                                });
-                                                
-                                                console.log('[Rewind] Effects Volume slider fix applied');
-                                            }
-                                        }
-                                    });
-                                };
+                                console.log('[Rewind] Audio shim poller started');
 
-                                win.setInterval(fixSlider, 1000);
 
                                 // Initialize heatmap overlay
                                 if (this.heatmapRenderer) this.heatmapRenderer.stop();
