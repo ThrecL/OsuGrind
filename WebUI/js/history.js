@@ -584,54 +584,135 @@ class HistoryModule {
                 mods: info.mods || '',
                 beatmapHash: info.beatmapHash || '',
                 replaysRoot: info.replaysRoot || '',
+                preferredSkin: '-Fun3cL', // Force the healthy skin
                 manualLoad: '0',
                 cacheBust: Date.now().toString()
             });
+
 
             const rewindFrame = rewindContainer.querySelector('.rewind-frame');
             if (rewindFrame) {
                 rewindFrame.src = `${baseUrl}?${params.toString()}`;
                 
-                // Inject style to make everything transparent in the player
-                rewindFrame.onload = () => {
-                    try {
-                        const style = rewindFrame.contentDocument.createElement('style');
-                        style.innerHTML = `
-                            body, html, #root { background: transparent !important; background-color: transparent !important; }
-                            .MuiPaper-root { background-color: transparent !important; background-image: none !important; box-shadow: none !important; }
-                            .MuiAppBar-root { background-color: transparent !important; background-image: none !important; box-shadow: none !important; }
-                            canvas:not(:first-of-type) { display: none !important; }
-                        `;
-                        rewindFrame.contentDocument.head.appendChild(style);
-
-                        // Initialize heatmap overlay
-                        if (this.heatmapRenderer) this.heatmapRenderer.stop();
-                        const heatmapContainer = modal.querySelector('.heatmap-circle-container');
-                        this.heatmapRenderer = new HeatmapRenderer(heatmapContainer);
-                        this.heatmapRenderer.start();
-                        
-                        // Audio Store Shim to prevent crashes
-                        const win = rewindFrame.contentWindow;
-                        if (!win.__SKIN_AUDIO_STORE) {
-                            // Define a setter/getter or just a plain object that can be overridden
-                            Object.defineProperty(win, '__SKIN_AUDIO_STORE', {
-                                configurable: true,
-                                enumerable: true,
-                                writable: true,
-                                value: {
-                                    setVolume: () => {},
-                                    play: () => {},
-                                    load: () => {}
+                        // Inject style to make everything transparent in the player
+                        rewindFrame.onload = () => {
+                            try {
+                                const win = rewindFrame.contentWindow;
+                                
+                                // FORCE SKIN SETTINGS: Overwrite localStorage inside the iframe
+                                if (win.localStorage) {
+                                    win.localStorage.clear(); // Clear all old state
+                                    win.localStorage.setItem('preferredSkin', 'osu:-Fun3cL');
+                                    win.localStorage.setItem('skin_osu:-Fun3cL', 'true');
                                 }
-                            });
-                            console.log('[Rewind] Audio shim injected (configurable)');
-                        }
+                                
+                                // Attempt to clear indexedDB (used by some players for caching)
+                                if (win.indexedDB) {
+                                    try {
+                                        win.indexedDB.databases().then(dbs => {
+                                            dbs.forEach(db => win.indexedDB.deleteDatabase(db.name));
+                                        });
+                                    } catch(e) {}
+                                }
 
-                        console.log('[Rewind] Transparency styles and heatmap initialized');
-                    } catch (e) {
-                        console.warn('[Rewind] Could not inject styles:', e);
-                    }
-                };
+                                const style = rewindFrame.contentDocument.createElement('style');
+                                style.innerHTML = `
+                                    body, html, #root { background: transparent !important; background-color: transparent !important; }
+                                    .MuiPaper-root { background-color: transparent !important; background-image: none !important; box-shadow: none !important; }
+                                    .MuiAppBar-root { background-color: transparent !important; background-image: none !important; box-shadow: none !important; }
+                                    canvas:not(:first-of-type) { display: none !important; }
+                                    
+                                    /* HIDE OTHER SKINS IN SETTINGS UI */
+                                    [role="listbox"] li:not(:contains("-Fun3cL")),
+                                    .MuiMenuItem-root:not(:contains("-Fun3cL")),
+                                    .MuiSelect-select:not(:contains("-Fun3cL")),
+                                    [data-value]:not([data-value*="-Fun3cL"]),
+                                    /* Hide the source selector entirely if needed */
+                                    .MuiFormControl-root:has(label:contains("Skin")),
+                                    .MuiBox-root:has(> .MuiTypography-root:contains("Skin Source")) {
+                                        display: none !important;
+                                    }
+                                `;
+                                rewindFrame.contentDocument.head.appendChild(style);
+
+                                // Advanced UI Cleaning: MutationObserver to hide unwanted skins in real-time
+                                const observer = new MutationObserver((mutations) => {
+                                    const items = rewindFrame.contentDocument.querySelectorAll('.MuiMenuItem-root, [role="option"], [data-value], .MuiTypography-root, .MuiListItem-root, .MuiFormLabel-root');
+                                    
+                                    items.forEach(item => {
+                                        const text = (item.textContent || '').toLowerCase();
+                                        const val = (item.getAttribute('data-value') || '').toLowerCase();
+                                        
+                                        // Hide anything mentioning "Skin" or "Default" that isn't our skin
+                                        const isSkinRelated = text.includes('skin') || text.includes('default') || val.includes('skin');
+                                        const isOurs = text.includes('-fun3cl') || val.includes('-fun3cl');
+                                        
+                                        if (isSkinRelated && !isOurs) {
+                                            item.style.display = 'none';
+                                            item.style.height = '0px';
+                                            item.style.padding = '0px';
+                                            item.style.margin = '0px';
+                                            item.style.visibility = 'hidden';
+                                            item.style.pointerEvents = 'none';
+                                        }
+                                    });
+                                });
+
+                                observer.observe(rewindFrame.contentDocument.body, {
+                                    childList: true,
+                                    subtree: true
+                                });
+
+                                // FIX: Effects Volume slider responsiveness (Seeking)
+                                const fixSlider = () => {
+                                    const labels = rewindFrame.contentDocument.querySelectorAll('.MuiTypography-root');
+                                    labels.forEach(label => {
+                                        if (label.textContent === 'Effects Volume') {
+                                            const slider = label.nextElementSibling;
+                                            if (slider && slider.classList.contains('MuiSlider-root') && !slider._fixed) {
+                                                slider._fixed = true;
+                                                
+                                                const updateVolume = (e) => {
+                                                    const rect = slider.getBoundingClientRect();
+                                                    const val = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+                                                    if (win.__SKIN_AUDIO_STORE && typeof win.__SKIN_AUDIO_STORE.setVolume === 'function') {
+                                                        win.__SKIN_AUDIO_STORE.setVolume(val);
+                                                    }
+                                                };
+
+                                                slider.addEventListener('mousedown', (e) => {
+                                                    updateVolume(e);
+                                                    const moveHandler = (me) => updateVolume(me);
+                                                    const upHandler = () => {
+                                                        win.removeEventListener('mousemove', moveHandler);
+                                                        win.removeEventListener('mouseup', upHandler);
+                                                    };
+                                                    win.addEventListener('mousemove', moveHandler);
+                                                    win.addEventListener('mouseup', upHandler);
+                                                });
+                                                
+                                                console.log('[Rewind] Effects Volume slider fix applied');
+                                            }
+                                        }
+                                    });
+                                };
+
+                                win.setInterval(fixSlider, 1000);
+
+                                // Initialize heatmap overlay
+                                if (this.heatmapRenderer) this.heatmapRenderer.stop();
+                                const heatmapContainer = modal.querySelector('.heatmap-circle-container');
+                                if (heatmapContainer) {
+                                    this.heatmapRenderer = new HeatmapRenderer(heatmapContainer);
+                                    this.heatmapRenderer.start();
+                                }
+
+                                console.log('[Rewind] Transparency styles, heatmap, and UI cleaning initialized');
+                            } catch (e) {
+                                console.warn('[Rewind] Could not inject styles:', e);
+                            }
+                        };
+
 
             }
             if (statusOverlay) {

@@ -200,11 +200,14 @@ public partial class WebViewWindow : Window
                               "--disable-features=Translate,InterestFeedContentSuggestions,LiveCaption,OptimizationHints,ContextualSearch " +
                               "--disk-cache-size=52428800 " +
                               "--disable-component-update " +
-                              "--mute-audio=false";
+                              "--autoplay-policy=no-user-gesture-required";
 
             var options = new CoreWebView2EnvironmentOptions(browserArgs);
             var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
             await _webView.EnsureCoreWebView2Async(env);
+
+            // Explicitly unmute at the control level
+            _webView.CoreWebView2.IsMuted = false;
 
             var skinsRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "rewind", "Skins");
             Directory.CreateDirectory(skinsRoot);
@@ -214,11 +217,11 @@ public partial class WebViewWindow : Window
                 skinsRoot,
                 CoreWebView2HostResourceAccessKind.Allow);
  
-             // Configure WebView2
-
+            // Configure WebView2
             _webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
             _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
             _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+
 
             // Handle messages from JavaScript
             _webView.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
