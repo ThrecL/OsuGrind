@@ -58,6 +58,11 @@ public sealed class PlayRow : INotifyPropertyChanged
     public string PpTimelineJson { get; set; } = "";
     public string AimOffsetsJson { get; set; } = "";
     public string CursorOffsetsJson { get; set; } = "";
+
+    // Enhanced Analytics
+    public string? HitErrorsJson { get; set; } // JSON array of offsets
+    public double KeyRatio { get; set; } // Top1 / (Top1 + Top2)
+
     // UI specific
     public string? BackgroundPath { get; set; }
     public string? MapPath { get; set; }
@@ -241,6 +246,8 @@ public sealed class PlayRow : INotifyPropertyChanged
             TimelineJson = c.TimelineJson,
             PpTimelineJson = c.PpTimelineJson,
             UR = c.UR,
+            HitErrorsJson = c.HitErrorsJson,
+            KeyRatio = c.KeyRatio,
             CursorOffsetsJson = c.CursorOffsetsJson,
             ReplayFile = c.ReplayFile,
             MapPath = c.MapPath,

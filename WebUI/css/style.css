@@ -120,6 +120,20 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Keyframe Animations
+═══════════════════════════════════════════════════════════════════════════ */
+
+@keyframes settingsRotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(180deg); }
+}
+
+@keyframes settingsPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 102, 171, 0.7); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 102, 171, 0); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    Title Bar
 ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -237,17 +251,58 @@ body {
     -webkit-app-region: no-drag;
 }
 
+@keyframes settingsRotate {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(180deg);
+    }
+}
+
+@keyframes settingsPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(255, 102, 171, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 0 8px rgba(255, 102, 171, 0);
+    }
+}
+
 .titlebar-btn {
-    width: 46px;
-    height: 42px;
+    width: 36px;
+    height: 36px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: transparent;
-    border: none;
-    color: #888;
-    cursor: pointer;
-    transition: all var(--transition-fast);
+    position: relative;
+}
+
+.titlebar-btn svg {
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.titlebar-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.titlebar-btn:hover svg {
+    transform: rotate(90deg);
+}
+
+.titlebar-btn.active {
+    animation: settingsPulse 0.6s ease;
+}
+
+.titlebar-btn.active svg {
+    animation: settingsRotate 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .titlebar-btn:hover {
@@ -303,6 +358,29 @@ body {
 .streak-pill {
     background: #1a0808;
     border-color: #331111;
+    cursor: pointer;
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.streak-pill:hover {
+    background: #2a0a0a;
+    transform: translateY(-1px);
+}
+
+.streak-icon {
+    font-size: 16px;
+}
+
+.streak-pill {
+    background: #1a0808;
+    border-color: #331111;
+    cursor: pointer;
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.streak-pill:hover {
+    background: #2a0a0a;
+    transform: translateY(-1px);
 }
 
 .streak-icon {
@@ -383,6 +461,431 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Goals Overlay
+═══════════════════════════════════════════════════════════════════════════ */
+
+@keyframes goalsModalSlideIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.goals-modal {
+    position: relative;
+    width: 900px;
+    max-width: 95vw;
+    max-height: 90vh;
+    background: linear-gradient(135deg, rgba(10, 10, 10, 0.98), rgba(20, 20, 20, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    overflow: hidden;
+    z-index: 10;
+    animation: goalsModalSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5),
+                0 0 100px rgba(255, 102, 171, 0.1) inset;
+}
+
+.goals-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 32px 40px 24px 40px;
+    background: linear-gradient(135deg, rgba(255, 102, 171, 0.05), rgba(187, 136, 255, 0.05));
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    position: relative;
+    overflow: hidden;
+}
+
+.goals-modal-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, 
+        transparent,
+        var(--accent-pink),
+        var(--accent-purple),
+        var(--accent-cyan),
+        transparent
+    );
+    animation: slideShine 3s ease-in-out infinite;
+}
+
+@keyframes slideShine {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+}
+
+.goals-icon-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 70px;
+    height: 70px;
+    background: linear-gradient(135deg, rgba(255, 102, 171, 0.15), rgba(187, 136, 255, 0.15));
+    border-radius: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.goals-icon {
+    font-size: 40px;
+    filter: drop-shadow(0 4px 12px rgba(255, 102, 171, 0.4));
+    animation: floatIcon 3s ease-in-out infinite;
+}
+
+@keyframes floatIcon {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+}
+
+.goals-title-section {
+    flex: 1;
+}
+
+.goals-title {
+    font-size: 32px;
+    font-weight: 900;
+    margin: 0;
+    background: linear-gradient(90deg, var(--accent-pink), var(--accent-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.5px;
+}
+
+.goals-subtitle {
+    margin: 4px 0 0 0;
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.goals-modal-body {
+    padding: 32px 40px 40px 40px;
+    overflow-y: auto;
+    max-height: calc(90vh - 140px);
+}
+
+/* Goals Modal - Custom Scrollbar */
+.goals-modal-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.goals-modal-body::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 4px;
+}
+
+.goals-modal-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+.goals-modal-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+/* Goals Modal */
+@keyframes goalCardSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(15px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes progressPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 rgba(255, 255, 255, 0);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+    }
+}
+
+@keyframes goalComplete {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+.goals-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    margin-top: 0;
+}
+
+@media (max-width: 800px) {
+    .goals-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.goal-card {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: goalCardSlideIn 0.5s ease-out backwards;
+    position: relative;
+    overflow: hidden;
+}
+
+.goal-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, var(--accent-pink), transparent);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.goal-card:nth-child(1) { 
+    animation-delay: 0.05s; 
+}
+.goal-card:nth-child(2) { 
+    animation-delay: 0.1s; 
+}
+.goal-card:nth-child(2)::before {
+    background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+}
+.goal-card:nth-child(3) { 
+    animation-delay: 0.15s; 
+}
+.goal-card:nth-child(3)::before {
+    background: linear-gradient(90deg, transparent, var(--accent-yellow), transparent);
+}
+.goal-card:nth-child(4) { 
+    animation-delay: 0.2s; 
+}
+.goal-card:nth-child(4)::before {
+    background: linear-gradient(90deg, transparent, var(--accent-purple), transparent);
+}
+
+.goal-card:hover {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.goal-card:hover::before {
+    opacity: 1;
+}
+
+.goal-card.completed {
+    border-color: rgba(255, 255, 255, 0.25);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+    animation: goalComplete 0.6s ease;
+}
+
+.goal-card.completed::before {
+    opacity: 1;
+}
+
+.goal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.goal-label {
+    font-size: 11px;
+    font-weight: 800;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.goal-value-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 4px 0;
+}
+
+.goal-current {
+    font-size: 40px;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    transition: transform 0.2s ease;
+    text-shadow: 0 2px 10px rgba(255, 102, 171, 0.2);
+}
+
+.goal-card.updated .goal-current {
+    animation: goalComplete 0.3s ease;
+}
+
+.goal-target {
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.goal-progress-bg {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 8px;
+    position: relative;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.goal-progress-fill {
+    height: 100%;
+    background: var(--accent-pink);
+    border-radius: 4px;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    box-shadow: 0 0 10px rgba(255, 102, 171, 0.5);
+}
+
+.goal-progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+    animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.goal-progress-fill.completed {
+    animation: progressPulse 1.5s ease-in-out infinite;
+}
+
+.goal-percentage {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 700;
+    text-align: right;
+    margin-top: 6px;
+    font-variant-numeric: tabular-nums;
+}
+
+.goal-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.goal-input-group label {
+    font-size: 9px;
+    color: var(--text-muted);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.goal-input {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    padding: 10px 12px;
+    font-size: 15px;
+    font-weight: 600;
+    outline: none;
+    transition: all 0.2s ease;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+}
+
+.goal-input:hover {
+    background: rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.goal-input:focus {
+    background: rgba(0, 0, 0, 0.5);
+    border-color: var(--accent-pink);
+    box-shadow: 0 0 0 3px rgba(255, 102, 171, 0.15);
+}
+
+.goal-input.error {
+    border-color: var(--accent-red);
+    animation: shake 0.3s ease;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+}
+
+.goals-status {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 24px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    opacity: 0;
+    transform: translateY(-5px);
+    transition: all 0.3s ease;
+}
+
+.goals-status.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.goals-status.success {
+    color: var(--accent-green);
+    border-color: rgba(0, 255, 136, 0.2);
+    background: rgba(0, 255, 136, 0.05);
+}
+
+.goals-status.error {
+    color: var(--accent-red);
+    border-color: rgba(255, 85, 102, 0.2);
+    background: rgba(255, 85, 102, 0.05);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    Tab Navigation
 ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -452,6 +955,17 @@ body {
    Cards
 ═══════════════════════════════════════════════════════════════════════════ */
 
+.cardd {
+    background: var(--bg-card);
+    border: 1px solid #1a1a1a;
+    border-radius: var(--radius-lg);
+    padding: 20px;
+}
+
+.cardd:hover {
+    border-color: #2a2a2a;
+}
+
 .card {
     background: var(--bg-card);
     border: 1px solid #1a1a1a;
@@ -467,9 +981,9 @@ body {
    Overlay
 ═══════════════════════════════════════════════════════════════════════════ */
 
-.overlay {
+.overlay-container {
     position: fixed;
-    inset: 0;
+    inset: 42px 0 0 0; /* Below titlebar */
     z-index: 1000;
     display: flex;
     align-items: center;
@@ -483,24 +997,41 @@ body {
     backdrop-filter: blur(10px);
 }
 
-.close-overlay {
+.overlay-content {
+    position: relative;
+    z-index: 10;
+    width: 90%;
+    max-width: 800px;
+    background: var(--bg-card);
+    border: 1px solid #333;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    animation: slideUp 0.3s ease-out;
+}
+
+.overlay-close {
     position: absolute;
     top: 16px;
     right: 16px;
     width: 32px;
     height: 32px;
-    background: rgba(255, 255, 255, 0.1);
-    border: none;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 50%;
     color: white;
-    font-size: 20px;
+    font-size: 18px;
     cursor: pointer;
     transition: all var(--transition-fast);
-    z-index: 10;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.close-overlay:hover {
-    background: rgba(255, 255, 255, 0.2);
+.overlay-close:hover {
+    background: var(--accent-red);
+    border-color: var(--accent-red);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -66,8 +66,8 @@
     <div id="statusbar">
         <div class="status-left">
             <div class="stat-pill">
-                <span class="stat-label">PAST 24H</span>
-                <span class="stat-value gradient-green" id="plays24h">0 plays</span>
+                <span class="stat-label">TODAY</span>
+                <span class="stat-value gradient-green" id="playsToday">0 plays</span>
             </div>
             <div class="stat-pill">
                 <span class="stat-label">SESSION</span>
@@ -213,18 +213,24 @@
                             class="mini-value neon-green" id="avgAcc">0%</span></div>
                     <div class="card mini-card"><span class="mini-label" id="avgPPLabel">AVG PP</span><span
                             class="mini-value neon-purple" id="avgPP">0</span></div>
+                    <div class="card mini-card"><span class="mini-label">AVG UR</span><span
+                            class="mini-value neon-cyan" id="avgUR">0</span></div>
                 </div>
 
                 <!-- Main Analytics Card -->
-                <div class="card chart-card main-analytics-card">
+                <div class="cardd chart-card main-analytics-card">
                     <div class="chart-header">
                         <div class="metric-selector">
                             <button class="p-btn active" data-metric="pp">PP PROGRESS</button>
                             <button class="p-btn" data-metric="performance">PERFORMANCE</button>
                             <button class="p-btn" data-metric="activity">ACTIVITY</button>
                             <button class="p-btn" data-metric="accuracy">ACCURACY</button>
+                            <button class="p-btn" data-metric="tapping">TAPPING</button>
+                            <button class="p-btn" data-metric="ur">UR TREND</button>
+                            <button class="p-btn" data-metric="histogram">HISTOGRAM</button>
                         </div>
                         <div class="period-selector">
+                            <button class="p-btn" data-days="today">TODAY</button>
                             <button class="p-btn" data-days="7">7D</button>
                             <button class="p-btn active" data-days="30">30D</button>
                             <button class="p-btn" data-days="90">90D</button>
@@ -300,7 +306,6 @@
                     </div>
                 </div>
 
-
                 <div class="settings-group danger-zone">
                     <h3 class="group-title">Danger Zone</h3>
                     <div class="setting-row">
@@ -313,28 +318,154 @@
     </main>
 
     <!-- Profile Overlay -->
-    <div id="profileOverlay" class="overlay" style="display:none;">
+    <div id="profileOverlay" class="overlay-container" style="display:none;">
         <div class="overlay-backdrop"></div>
-        <div class="profile-panel">
-            <button class="close-overlay" id="closeProfile">×</button>
-            <div class="profile-header">
-                <div class="profile-bg" id="profileBg"></div>
-                <div class="profile-info">
-                    <img src="" alt="" class="profile-avatar" id="profileAvatar">
-                    <div class="profile-details">
-                        <h2 class="profile-username" id="profileUsername">Not logged in</h2>
-                        <div class="profile-rank" id="profileRank"></div>
+        <div class="profile-modal-new">
+            <button class="overlay-close" id="closeProfile">✕</button>
+            
+            <!-- Profile Header with Cover -->
+            <div class="profile-header-new">
+                <div class="profile-cover" id="profileBg"></div>
+                <div class="profile-info-section">
+                    <div class="profile-avatar-wrapper">
+                        <img src="" alt="" class="profile-avatar-new" id="profileAvatar">
+                    </div>
+                    <div class="profile-user-info">
+                        <h2 class="profile-username-new" id="profileUsername">Not logged in</h2>
+                        <div class="profile-rank-new" id="profileRank"></div>
                     </div>
                 </div>
             </div>
-            <div class="profile-body">
-                <div class="skill-badges" id="skillBadges"></div>
-                <div class="ranking-cards" id="rankingCards"></div>
-                <div class="profile-insights" id="profileInsights"></div>
+
+            <!-- Profile Content -->
+            <div class="profile-content-new">
+                <!-- Skill Badges -->
+                <div class="profile-section">
+                    <h3 class="section-title">Statistics</h3>
+                    <div class="skill-badges-new" id="skillBadges"></div>
+                </div>
+
+                <!-- Ranking Cards -->
+                <div class="profile-section">
+                    <div class="ranking-cards-new" id="rankingCards"></div>
+                </div>
+
+                <!-- Insights -->
+                <div class="profile-section">
+                    <div class="profile-insights-new" id="profileInsights"></div>
+                </div>
+
+                <!-- Actions -->
+                <div class="profile-actions-new">
+                    <button class="btn-login" id="loginBtn">
+                        <span class="btn-icon">🎮</span>
+                        <span>LOGIN WITH OSU!</span>
+                    </button>
+                    <button class="btn-logout" id="logoutBtn" style="display:none;">
+                        <span class="btn-icon">👋</span>
+                        <span>LOGOUT</span>
+                    </button>
+                </div>
             </div>
-            <div class="profile-footer">
-                <button class="login-btn" id="loginBtn">Login with osu!</button>
-                <button class="logout-btn" id="logoutBtn" style="display:none;">Logout</button>
+        </div>
+    </div>
+
+    <!-- Goals Overlay -->
+    <div id="goalsOverlay" class="overlay-container" style="display:none;">
+        <div class="overlay-backdrop"></div>
+        <div class="goals-modal">
+            <button class="overlay-close" id="closeGoals">✕</button>
+            
+            <div class="goals-modal-header">
+                <div class="goals-icon-wrapper">
+                    <span class="goals-icon">🎯</span>
+                </div>
+                <div class="goals-title-section">
+                    <h2 class="goals-title">Daily Goals</h2>
+                    <p class="goals-subtitle">Track your progress and stay motivated</p>
+                </div>
+            </div>
+
+            <div class="goals-modal-body">
+                <div class="goals-grid">
+                    <!-- Plays Goal -->
+                    <div class="goal-card">
+                        <div class="goal-header">
+                            <span class="goal-label">Plays</span>
+                            <span class="goal-target" id="goalPlaysTarget">/ 0</span>
+                        </div>
+                        <div class="goal-value-wrap">
+                            <span class="goal-current neon-pink" id="goalPlaysCurrent">0</span>
+                        </div>
+                        <div class="goal-progress-bg">
+                            <div class="goal-progress-fill" id="goalPlaysFill" style="width: 0%"></div>
+                        </div>
+                        <div class="goal-percentage" id="goalPlaysPercent">0%</div>
+                        <div class="goal-input-group">
+                            <label>SET TARGET</label>
+                            <input type="number" min="1" max="1000" class="goal-input" id="goalPlaysInput" placeholder="20" title="Target number of plays per day (1-1000)">
+                        </div>
+                    </div>
+
+                    <!-- Hits Goal -->
+                    <div class="goal-card">
+                        <div class="goal-header">
+                            <span class="goal-label">Hit Objects</span>
+                            <span class="goal-target" id="goalHitsTarget">/ 0</span>
+                        </div>
+                        <div class="goal-value-wrap">
+                            <span class="goal-current neon-cyan" id="goalHitsCurrent">0</span>
+                        </div>
+                        <div class="goal-progress-bg">
+                            <div class="goal-progress-fill" id="goalHitsFill" style="width: 0%; background: var(--accent-cyan);"></div>
+                        </div>
+                        <div class="goal-percentage" id="goalHitsPercent">0%</div>
+                        <div class="goal-input-group">
+                            <label>SET TARGET</label>
+                            <input type="number" min="100" max="100000" class="goal-input" id="goalHitsInput" placeholder="5000" title="Target hit objects per day (100-100,000)">
+                        </div>
+                    </div>
+
+                    <!-- Stars Goal -->
+                    <div class="goal-card">
+                        <div class="goal-header">
+                            <span class="goal-label">Star Challenge</span>
+                            <span class="goal-target" id="goalStarsTarget">≥ 5.0★</span>
+                        </div>
+                        <div class="goal-value-wrap">
+                            <span class="goal-current neon-yellow" id="goalStarsCurrent">0</span>
+                            <span class="goal-target">plays</span>
+                        </div>
+                        <div class="goal-progress-bg">
+                            <div class="goal-progress-fill" id="goalStarsFill" style="width: 0%; background: var(--accent-yellow);"></div>
+                        </div>
+                        <div class="goal-percentage" id="goalStarsPercent">0%</div>
+                        <div class="goal-input-group">
+                            <label>STAR THRESHOLD</label>
+                            <input type="number" step="0.1" min="1" max="15" class="goal-input" id="goalStarsInput" placeholder="5.0" title="Minimum star rating to count (1.0-15.0)">
+                        </div>
+                    </div>
+
+                    <!-- PP Goal -->
+                    <div class="goal-card">
+                        <div class="goal-header">
+                            <span class="goal-label">PP Gained</span>
+                            <span class="goal-target" id="goalPPTarget">/ 0</span>
+                        </div>
+                        <div class="goal-value-wrap">
+                            <span class="goal-current neon-purple" id="goalPPCurrent">0</span>
+                        </div>
+                        <div class="goal-progress-bg">
+                            <div class="goal-progress-fill" id="goalPPFill" style="width: 0%; background: var(--accent-purple);"></div>
+                        </div>
+                        <div class="goal-percentage" id="goalPPPercent">0%</div>
+                        <div class="goal-input-group">
+                            <label>SET TARGET</label>
+                            <input type="number" min="1" max="10000" class="goal-input" id="goalPPInput" placeholder="100" title="Target PP gain per day (1-10,000)">
+                        </div>
+                    </div>
+                </div>
+                <div id="goalsStatus" class="goals-status">✓ All changes saved</div>
             </div>
         </div>
     </div>
@@ -360,6 +491,7 @@
     <script src="js/history.js"></script>
     <script src="js/settings.js"></script>
     <script src="js/profile.js"></script>
+    <script src="js/goals.js"></script>
 </body>
 
 </html>

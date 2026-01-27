@@ -2,6 +2,71 @@
    HISTORY TAB Styles - Redesigned v2
 ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Animations */
+@keyframes calendarDayIn {
+    from {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes dayPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 rgba(255, 102, 171, 0.3);
+    }
+    50% {
+        box-shadow: 0 0 15px rgba(255, 102, 171, 0.5);
+    }
+}
+
+@keyframes slideOutLeft {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(-60px);
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(60px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes slideOutRight {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(60px);
+    }
+}
+
+@keyframes slideInLeft {
+    from {
+        opacity: 0;
+        transform: translateX(-60px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
 #tab-history {
     height: 100%;
     overflow: hidden;
@@ -17,6 +82,14 @@
 #calendarView {
     max-width: 900px;
     margin: 0 auto;
+}
+
+#calendarView.exiting {
+    animation: slideOutLeft 0.3s ease forwards;
+}
+
+#calendarView.entering {
+    animation: slideInLeft 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .calendar-header {
@@ -85,7 +158,47 @@
     cursor: pointer;
     transition: all var(--transition-fast);
     position: relative;
+    animation: calendarDayIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
 }
+
+/* Staggered animation delays for wave effect */
+.calendar-day:nth-child(1) { animation-delay: 0.01s; }
+.calendar-day:nth-child(2) { animation-delay: 0.02s; }
+.calendar-day:nth-child(3) { animation-delay: 0.03s; }
+.calendar-day:nth-child(4) { animation-delay: 0.04s; }
+.calendar-day:nth-child(5) { animation-delay: 0.05s; }
+.calendar-day:nth-child(6) { animation-delay: 0.06s; }
+.calendar-day:nth-child(7) { animation-delay: 0.07s; }
+.calendar-day:nth-child(8) { animation-delay: 0.08s; }
+.calendar-day:nth-child(9) { animation-delay: 0.09s; }
+.calendar-day:nth-child(10) { animation-delay: 0.1s; }
+.calendar-day:nth-child(11) { animation-delay: 0.11s; }
+.calendar-day:nth-child(12) { animation-delay: 0.12s; }
+.calendar-day:nth-child(13) { animation-delay: 0.13s; }
+.calendar-day:nth-child(14) { animation-delay: 0.14s; }
+.calendar-day:nth-child(15) { animation-delay: 0.15s; }
+.calendar-day:nth-child(16) { animation-delay: 0.16s; }
+.calendar-day:nth-child(17) { animation-delay: 0.17s; }
+.calendar-day:nth-child(18) { animation-delay: 0.18s; }
+.calendar-day:nth-child(19) { animation-delay: 0.19s; }
+.calendar-day:nth-child(20) { animation-delay: 0.2s; }
+.calendar-day:nth-child(21) { animation-delay: 0.21s; }
+.calendar-day:nth-child(22) { animation-delay: 0.22s; }
+.calendar-day:nth-child(23) { animation-delay: 0.23s; }
+.calendar-day:nth-child(24) { animation-delay: 0.24s; }
+.calendar-day:nth-child(25) { animation-delay: 0.25s; }
+.calendar-day:nth-child(26) { animation-delay: 0.26s; }
+.calendar-day:nth-child(27) { animation-delay: 0.27s; }
+.calendar-day:nth-child(28) { animation-delay: 0.28s; }
+.calendar-day:nth-child(29) { animation-delay: 0.29s; }
+.calendar-day:nth-child(30) { animation-delay: 0.3s; }
+.calendar-day:nth-child(31) { animation-delay: 0.31s; }
+.calendar-day:nth-child(32) { animation-delay: 0.32s; }
+.calendar-day:nth-child(33) { animation-delay: 0.33s; }
+.calendar-day:nth-child(34) { animation-delay: 0.34s; }
+.calendar-day:nth-child(35) { animation-delay: 0.35s; }
+.calendar-day:nth-child(36) { animation-delay: 0.36s; }
+.calendar-day:nth-child(37) { animation-delay: 0.37s; }
 
 .calendar-day:hover {
     background: var(--bg-hover);
@@ -100,6 +213,8 @@
 .calendar-day.has-plays {
     background: rgba(255, 102, 171, 0.1);
     border-color: rgba(255, 102, 171, 0.3);
+    animation: calendarDayIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) backwards, 
+               dayPulse 3s ease-in-out infinite 1s;
 }
 
 .calendar-day.has-plays:hover {
@@ -128,6 +243,14 @@
 #dayView {
     max-width: 1000px;
     margin: 0 auto;
+}
+
+#dayView.entering {
+    animation: slideInRight 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+#dayView.exiting {
+    animation: slideOutRight 0.3s ease forwards;
 }
 
 .day-header {

@@ -115,45 +115,16 @@ namespace OsuGrind.Import
 
             // Parse aliases
             var aliasList = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            aliasList.Add(""); 
+            aliasList.Add(" "); 
+            aliasList.Add("Guest");
+
             if (!string.IsNullOrWhiteSpace(aliases))
             {
                 foreach (var a in aliases.Split(',', StringSplitOptions.RemoveEmptyEntries))
                     aliasList.Add(a.Trim());
             }
-            
-            string likelyUser = targetUsername;
-            if (string.IsNullOrEmpty(likelyUser))
-            {
-                // Auto-detect likely local user from scores.db
-                var counts = new Dictionary<string, int>();
-                try {
-                    using (var fs = File.OpenRead(scoresDbPath))
-                    using (var r = new BinaryReader(fs)) {
-                        r.ReadInt32(); // version
-                        int bmCount = r.ReadInt32();
-                        for (int i = 0; i < bmCount; i++) {
-                            ReadOsuString(r); // md5
-                            int sCount = r.ReadInt32();
-                            for (int j = 0; j < sCount; j++) {
-                                r.ReadByte(); r.ReadInt32(); ReadOsuString(r); // mode, ver, md5
-                                string pName = ReadOsuString(r);
-                                ReadOsuString(r); // replay md5
-                                r.BaseStream.Seek(10, SeekOrigin.Current); // hits
-                                r.ReadInt32(); r.ReadUInt16(); r.ReadBoolean(); r.ReadInt32(); ReadOsuString(r); r.ReadInt64(); // score, combo, perfect, mods, graph, date
-                                r.ReadInt32(); // -1
-                                long onlineId = r.ReadInt64();
-                                if (onlineId <= 0 && !string.IsNullOrEmpty(pName) && !pName.Equals("Guest", StringComparison.OrdinalIgnoreCase)) {
-                                    counts[pName] = counts.GetValueOrDefault(pName) + 1;
-                                }
-                            }
-                        }
-                    }
-                    likelyUser = counts.OrderByDescending(x => x.Value).FirstOrDefault().Key;
-                } catch { }
-            }
 
-            if (!string.IsNullOrEmpty(likelyUser)) aliasList.Add(likelyUser);
-            aliasList.Add("Guest");
             if (!string.IsNullOrEmpty(targetUsername)) aliasList.Add(targetUsername);
 
             DebugService.Log($"Found stable at: {path}. Importing for aliases: {string.Join(", ", aliasList)}", "StableImport");
@@ -229,9 +200,10 @@ namespace OsuGrind.Import
                                     r.ReadInt32(); // Skip 0xFFFFFFFF marker
                                     var onlineId = r.ReadInt64();
                                     
-                                    if (mode != 0) continue; // Only Standard
-
-                                    // FILTER: Only user/local/alias replays
+                                     if (mode != 0) continue; // Only Standard
+                                    if (scoreVal <= 0) continue; // Skip aborted/invalid scores
+ 
+                                     // FILTER: Only user/local/alias replays
                                     if (!aliasList.Contains(playerName))
                                     {
                                         continue;
@@ -246,7 +218,7 @@ namespace OsuGrind.Import
                                     }
                                     catch { createdAt = DateTime.UtcNow; }
 
-                                    // DEDUPLICATION CHECK
+                                     // DEDUPLICATION CHECK
                                     string sig = $"{mapMd5}|{scoreVal}|{createdAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)}";
                                     if (existingSignatures.Contains(sig))
                                     {
@@ -296,12 +268,41 @@ namespace OsuGrind.Import
                                         catch { }
                                     }
 
-                                    // REPLAY LINKING: Stable replays are stored in Data/r/MD5.osr
+                                     // REPLAY LINKING: Stable replays are stored in Data/r/MD5.osr
                                     string linkedReplayFile = "";
                                     if (!string.IsNullOrEmpty(replayMd5))
                                     {
-                                        var replayCandidate = Path.Combine(path, "Data", "r", $"{replayMd5}.osr");
-                                        if (File.Exists(replayCandidate)) linkedReplayFile = replayCandidate;
+                                        var rDir = Path.Combine(path, "Data", "r");
+                                        var replayCandidate = Path.Combine(rDir, $"{replayMd5}.osr");
+                                        if (File.Exists(replayCandidate)) 
+                                        {
+                                            linkedReplayFile = replayCandidate;
+                                        }
+                                        else
+                                        {
+                                            // Fallback: Search Data/r for any file that matches the beatmap hash and is recent
+                                            try {
+                                                if (Directory.Exists(rDir))
+                                                {
+                                                    // Search for files starting with mapMd5
+                                                    var files = Directory.GetFiles(rDir, $"{mapMd5}*.osr");
+                                                    if (files.Length > 0)
+                                                    {
+                                                        // Get the one closest to our score timestamp
+                                                        var bestMatch = files.Select(f => new FileInfo(f))
+                                                            .OrderBy(fi => Math.Abs((fi.LastWriteTimeUtc - createdAt).TotalSeconds))
+                                                            .FirstOrDefault();
+                                                        
+                                                        if (bestMatch != null)
+                                                        {
+                                                            // If it's within 2 hours of the score timestamp, it's likely the right one
+                                                            if (Math.Abs((bestMatch.LastWriteTimeUtc - createdAt).TotalHours) < 2)
+                                                                linkedReplayFile = bestMatch.FullName;
+                                                        }
+                                                    }
+                                                }
+                                            } catch { }
+                                        }
                                     }
 
                                     var play = new PlayRow
@@ -328,13 +329,29 @@ namespace OsuGrind.Import
                                         ReplayHash = replayMd5 // Ensure this is set so UI knows it's imported
                                     };
 
+                                    // ANALYZE REPLAY IF AVAILABLE
+                                         if (!string.IsNullOrEmpty(linkedReplayFile) && File.Exists(osuPath))
+                                         {
+                                             try {
+                                                 DebugService.Log($"Analyzing stable replay: {linkedReplayFile}", "StableImport");
+                                                 var analysis = MissAnalysisService.Analyze(osuPath, linkedReplayFile);
+                                                 play.UR = analysis.UR;
+                                                 play.HitErrorsJson = System.Text.Json.JsonSerializer.Serialize(analysis.HitErrors);
+                                                 play.KeyRatio = analysis.KeyRatio;
+                                                 DebugService.Log($"Analysis complete: UR={analysis.UR:F2}, KeyRatio={analysis.KeyRatio:P1}", "StableImport");
+                                             } catch (Exception ex) {
+                                                 DebugService.Error($"Analysis failed for {linkedReplayFile}: {ex.Message}", "StableImport");
+                                             }
+                                         }
+
                                     await _db.InsertPlayAsync(play);
 
-                                    // ALSO POPULATE BEATMAPS TABLE for backgrounds/metadata
-                                    if (info != null)
-                                    {
-                                        var bgPath = Path.Combine(path, "Songs", info.FolderName, info.FileName);
-                                        // Attempt to find real background file from .osu content?
+                                     // ALSO POPULATE BEATMAPS TABLE for backgrounds/metadata
+                                     if (info != null)
+                                     {
+                                         var bgPath = Path.Combine(path, "Songs", info.FolderName, info.FileName);
+
+                                         // Attempt to find real background file from .osu content?
                                         // For now, if we can find the .osu, we can parse it.
                                         string bgIdentifier = "";
                                         if (File.Exists(osuPath))

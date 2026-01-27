@@ -117,6 +117,11 @@ class LiveModule {
         this.slots = {};
         this.lastModsJson = "";
         this.lastState = "Idle";
+        this.topPlays = []; // Cached top plays for PP tier detection
+        this.isOnFire = false; // Track fire state
+        this.currentPPTier = null; // Track current PP tier
+        this.fireInterval = null;
+        this.cachedMapMaxCombo = 0;
     }
 
 
@@ -124,7 +129,178 @@ class LiveModule {
         this.cacheElements();
         this.initSlots();
         this.subscribeToLiveData();
+        this.fetchTopPlays(); // Initial fetch
         console.log('[Live] Professional HUD initialized');
+    }
+
+    async fetchTopPlays() {
+        try {
+            const data = await window.api.getTopPlays();
+            if (Array.isArray(data)) {
+                this.topPlays = data.map(s => s.pp).sort((a, b) => b - a);
+                console.log(`[Live] Cached ${this.topPlays.length} top plays`);
+            }
+        } catch (e) {
+            console.warn('[Live] Could not fetch top plays. Are you logged in?');
+        }
+    }
+
+    updateFireEffect(data) {
+        const combo = data.combo || 0;
+        const misses = data.hitCounts?.miss ?? 0;
+        const state = data.playState || 'Idle';
+        const isPlaying = state === 'Playing' || state === 'Paused';
+
+        // Trigger fire based on total possible combo
+        // Perfectly hit first half: combo >= 50% of total and 0 misses
+        // If cachedMapMaxCombo is not set yet, we use a sensible fallback
+        const totalPossible = this.cachedMapMaxCombo || data.mapMaxCombo || 0;
+        const target = totalPossible > 0 ? totalPossible / 2 : 250;
+        
+        const shouldBeOnFire = isPlaying && combo >= target && misses === 0 && totalPossible > 0;
+
+        if (shouldBeOnFire !== this.isOnFire) {
+            this.isOnFire = shouldBeOnFire;
+            const comboEl = this.elements.combo;
+            const wrapEl = comboEl?.parentElement; // combo-wrap
+            
+            if (comboEl) {
+                comboEl.classList.toggle('on-fire', this.isOnFire);
+                wrapEl?.classList.toggle('on-fire-extra', this.isOnFire);
+                
+                if (this.isOnFire) {
+                    console.log(`[Live] 🔥 COMBO ON FIRE! (Hit half: ${combo}/${Math.round(target)})`);
+                    this.startFireParticles();
+                } else {
+                    console.log(`[Live] ❄️ Fire extinguished. (Misses: ${misses}, Combo: ${combo}, Target: ${Math.round(target)})`);
+                    this.stopFireParticles();
+                }
+            }
+        }
+    }
+
+    startFireParticles() {
+        if (this.fireInterval) return;
+        this.fireInterval = setInterval(() => {
+            if (!this.isOnFire) return;
+            this.spawnFireParticle();
+        }, 150);
+    }
+
+    stopFireParticles() {
+        if (this.fireInterval) {
+            clearInterval(this.fireInterval);
+            this.fireInterval = null;
+        }
+    }
+
+    spawnFireParticle() {
+        const wrap = this.elements.combo?.parentElement;
+        if (!wrap) return;
+
+        const particle = document.createElement('div');
+        particle.className = 'on-fire-ember';
+        particle.textContent = ['🔥', '✨', '🔸', '🔥'][Math.floor(Math.random() * 4)];
+        
+        const left = 10 + Math.random() * 80;
+        const duration = 1 + Math.random() * 1;
+        const delay = Math.random() * 0.5;
+        const drift = (Math.random() - 0.5) * 60;
+        
+        particle.style.setProperty('--left', `${left}%`);
+        particle.style.setProperty('--duration', `${duration}s`);
+        particle.style.setProperty('--delay', `${delay}s`);
+        particle.style.setProperty('--drift', `${drift}px`);
+        
+        wrap.appendChild(particle);
+        setTimeout(() => particle.remove(), (duration + delay) * 1000);
+    }
+
+    clearFireEffect() {
+        if (this.isOnFire) {
+            this.isOnFire = false;
+            this.elements.combo?.classList.remove('on-fire');
+            this.elements.combo?.parentElement?.classList.remove('on-fire-extra');
+            this.stopFireParticles();
+        }
+    }
+
+    updatePPTier(ppVal, isPlayingOrResults) {
+        if (!isPlayingOrResults || !this.topPlays.length) {
+            this.clearPPTier();
+            return;
+        }
+
+        let tier = null;
+        let rank = 101;
+
+        for (let i = 0; i < this.topPlays.length; i++) {
+            if (ppVal >= this.topPlays[i]) {
+                rank = i + 1;
+                break;
+            }
+        }
+
+        // Tier thresholds
+        if (rank <= 1) tier = 'rank-top1';
+        else if (rank <= 2) tier = 'rank-top2';
+        else if (rank <= 3) tier = 'rank-top3';
+        else if (rank <= 5) tier = 'rank-top5';
+        else if (rank <= 10) tier = 'rank-top10';
+        else if (rank <= 15) tier = 'rank-top15';
+        else if (rank <= 25) tier = 'rank-top25';
+        else if (rank <= 50) tier = 'rank-top50';
+        else if (rank <= 100) tier = 'rank-top100';
+
+        if (tier !== this.currentPPTier) {
+            const ppEl = this.elements.pp;
+            if (ppEl) {
+                if (this.currentPPTier) ppEl.classList.remove(this.currentPPTier);
+                if (tier) {
+                    ppEl.classList.add(tier);
+                    // Pop effect on tier upgrade
+                    ppEl.classList.add('changed');
+                    setTimeout(() => ppEl.classList.remove('changed'), 500);
+                }
+                
+                // Ultimate effect for Top 1
+                if (tier === 'rank-top1') {
+                    this.triggerTop1Effect();
+                }
+            }
+            this.currentPPTier = tier;
+        }
+    }
+
+    clearPPTier() {
+        if (this.currentPPTier) {
+            this.elements.pp?.classList.remove(this.currentPPTier);
+            this.currentPPTier = null;
+        }
+    }
+
+    triggerTop1Effect() {
+        console.log('[Live] 👑 ULTIMATE TOP 1 PP REACHED!');
+        
+        // Screen Shake
+        document.body.classList.add('screen-shake');
+        setTimeout(() => document.body.classList.remove('screen-shake'), 2000);
+        
+        // Confetti
+        this.spawnConfetti();
+    }
+
+    spawnConfetti() {
+        // Simple particle burst
+        for (let i = 0; i < 50; i++) {
+            const p = document.createElement('div');
+            p.className = 'confetti-particle';
+            p.style.left = Math.random() * 100 + 'vw';
+            p.style.backgroundColor = `hsl(${Math.random() * 360}, 100%, 50%)`;
+            p.style.animationDelay = Math.random() * 2 + 's';
+            document.body.appendChild(p);
+            setTimeout(() => p.remove(), 5000);
+        }
     }
 
     cacheElements() {
@@ -170,10 +346,11 @@ class LiveModule {
     }
 
     subscribeToLiveData() {
-        window.api.onLiveData(data => this.updateUI(data));
+        window.api.onLiveData(data => this.update(data));
     }
 
-    updateUI(data) {
+    update(data) {
+        if (!data || data.type === 'refresh') return;
         const el = this.elements;
 
         if (data.backgroundPath && el.background) {
@@ -232,13 +409,21 @@ class LiveModule {
         if (this.slots.combo) {
             let comboVal = 0;
             if (state === 'Results') {
-                comboVal = data.maxCombo || 0; // Highest combo achieved
+                comboVal = data.maxCombo || 0; 
             } else if (isPlaying && !suppressStats) {
                 comboVal = data.combo || 0;
             } else if (!isPlaying) {
                 comboVal = data.mapMaxCombo || 0;
             }
             this.slots.combo.setValue(comboVal);
+        }
+
+        // Cache Map Max Combo from Song Select or map change
+        if (data.mapMaxCombo > 0) {
+            if (this.cachedMapMaxCombo !== data.mapMaxCombo) {
+                console.log(`[Live] New Map Max Combo: ${data.mapMaxCombo}`);
+                this.cachedMapMaxCombo = data.mapMaxCombo;
+            }
         }
 
         if (this.slots.score) {
@@ -258,6 +443,16 @@ class LiveModule {
                 ppVal = data.ppIfFc || 0;
             }
             this.slots.pp.setValue(ppVal);
+            
+            // PP Tier Detection (Stable even in results)
+            this.updatePPTier(ppVal, isPlaying || state === 'Results');
+        }
+        
+        // Fire Effect Detection (after combo update)
+        if (isPlaying && !suppressStats) {
+            this.updateFireEffect(data);
+        } else {
+            this.clearFireEffect();
         }
         
         if (this.slots.stars) {
@@ -267,20 +462,16 @@ class LiveModule {
             // Dynamic Star Badge Styling
             const container = document.getElementById('sr-badge-container');
             if (container) {
-                // Remove existing sr-* and sr-text-* classes
                 container.className = container.className.replace(/\bsr-\d+\b/g, '').replace(/\bsr-text-\d+\b/g, '');
                 const level = Math.floor(sr);
                 const safeLevel = Math.min(15, Math.max(0, level));
                 container.classList.add(`sr-${safeLevel}`);
-                
-                // Text color logic: 0.00-6.49 (#000000BF), 6.50+ (#FFD966)
                 const textColorClass = (sr < 6.499) ? 'sr-text-0' : 'sr-text-1';
                 container.classList.add(textColorClass);
             }
         }
         if (this.slots.bpm) this.slots.bpm.setValue(data.bpm || 0);
 
-        // Grade
         if (el.grade) {
             const grade = (isPlaying && !suppressStats) ? (data.grade || '—') : 'SS';
             if (el.grade.textContent !== grade) {
@@ -289,37 +480,23 @@ class LiveModule {
             }
         }
 
-        // Static attributes
         if (el.cs) el.cs.textContent = (data.cs || 0).toFixed(1);
         if (el.ar) el.ar.textContent = (data.ar || 0).toFixed(1);
         if (el.od) el.od.textContent = (data.od || 0).toFixed(1);
         if (el.hp) el.hp.textContent = (data.hp || 0).toFixed(1);
 
-        // Update HP Bar if playing
-        if (isPlaying && el.hp) {
-             const health = data.liveHP != null ? data.liveHP : (data.hp || 0);
-             // In Lazer HP is often 0-1, in Stable it might be 0-1 or 0-100?
-             // Most memory readers normalize to 0-1.
-             const hpPercent = Math.min(100, Math.max(0, health * 100));
-             // el.hpBar.style.width = `${hpPercent}%`; // Assuming there is an HP bar
-        }
-
-        // Hit Counts with slots
         if (isPlaying) {
             if (this.slots.count300) this.slots.count300.setValue(suppressStats ? 0 : h300);
             if (this.slots.count100) this.slots.count100.setValue(suppressStats ? 0 : h100);
             if (this.slots.count50) this.slots.count50.setValue(suppressStats ? 0 : h50);
             if (this.slots.countMiss) this.slots.countMiss.setValue(suppressStats ? 0 : hMiss);
         } else {
-            // Song select: everything should be "the max"
-            // Show total objects as "Great" hits
             if (this.slots.count300) this.slots.count300.setValue(data.totalObjects || 0);
             if (this.slots.count100) this.slots.count100.setValue(0);
             if (this.slots.count50) this.slots.count50.setValue(0);
             if (this.slots.countMiss) this.slots.countMiss.setValue(0);
         }
 
-        // Time
         if (el.mapTime) {
             let time = isPlaying ? (data.currentTime || 0) : (data.totalTime || 0);
             const mins = Math.floor(time / 60);

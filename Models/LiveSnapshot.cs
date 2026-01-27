@@ -46,6 +46,8 @@ public sealed class CompletedPlay
     
     // Advanced Analytics
     public string HitOffsets { get; set; } = ""; // Comma-separated or JSON list of hit errors
+    public string? HitErrorsJson { get; set; }
+    public double KeyRatio { get; set; }
     public string TimelineJson { get; set; } = ""; // JSON of (time, combo, isMiss)
     public string PpTimelineJson { get; set; } = ""; // JSON array of PP per passed object
     public string AimOffsetsJson { get; set; } = ""; // JSON array for aim scatter plot
@@ -136,6 +138,8 @@ public sealed class LiveSnapshot
 
     public bool IsLazer { get; set; }
     public string? ReplayHash { get; set; }
+    public string? HitErrorsJson { get; set; }
+    public double KeyRatio { get; set; }
 
     public LiveSnapshot Clone()
     {
@@ -200,7 +204,9 @@ public sealed class LiveSnapshot
             IsLazer = this.IsLazer,
             LiveHitOffsets = new List<double>(this.LiveHitOffsets),
             LiveUR = this.LiveUR,
-            ScoreDate = this.ScoreDate
+            ScoreDate = this.ScoreDate,
+            HitErrorsJson = this.HitErrorsJson,
+            KeyRatio = this.KeyRatio
         };
     }
 

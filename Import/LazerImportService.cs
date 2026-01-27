@@ -57,6 +57,7 @@ public class LazerImportService
         CleanupTempRealmFiles();
         
         string realmPath = GetRealmPath(lazerFolderPath);
+        string lazerFilesPath = Path.Combine(Path.GetDirectoryName(realmPath) ?? "", "files");
         DebugService.Log($"Realm path: {realmPath}", "LazerImportService");
 
         if (!File.Exists(realmPath))
@@ -134,6 +135,15 @@ public class LazerImportService
                 int n50 = statsDic.GetValueOrDefault("meh", 0) + statsDic.GetValueOrDefault("Meh", 0);
                 int nMiss = statsDic.GetValueOrDefault("miss", 0) + statsDic.GetValueOrDefault("Miss", 0);
 
+                // Analyze Lazer HitEvents for UR and HitErrors
+                double lazerUR = 0;
+                if (s.HitOffsets != null && s.HitOffsets.Count > 0)
+                {
+                    double avg = s.HitOffsets.Average();
+                    double sumSq = s.HitOffsets.Sum(d => Math.Pow(d - avg, 2));
+                    lazerUR = Math.Sqrt(sumSq / s.HitOffsets.Count) * 10;
+                }
+
                 // Parse Mods
                 List<string> modsListAcronyms = new();
                 uint modsBits = 0;
@@ -205,9 +215,32 @@ public class LazerImportService
                     Misses = nMiss,
                     PP = calculatedPP,
                     Stars = s.StarRating,
-                    HitOffsets = string.Join(",", s.HitOffsets.Select(o => o.ToString("F2"))),
-                    ReplayHash = s.ReplayHash
+                    UR = lazerUR,
+                    HitErrorsJson = s.HitOffsets != null ? System.Text.Json.JsonSerializer.Serialize(s.HitOffsets) : null,
+                    HitOffsets = string.Join(",", s.HitOffsets?.Select(o => o.ToString("F2")) ?? Enumerable.Empty<string>()),
+                    ReplayHash = s.ReplayHash,
+                    MapPath = osuPath ?? ""
                 };
+
+                // ANALYZE LAZER REPLAY FOR TAPPING STATS IF POSSIBLE
+                if (!string.IsNullOrEmpty(s.ReplayHash) && !string.IsNullOrEmpty(osuPath))
+                {
+                    try {
+                        string replayPath = Path.Combine(lazerFilesPath, s.ReplayHash.Substring(0, 1), s.ReplayHash.Substring(0, 2), s.ReplayHash);
+                        if (File.Exists(replayPath))
+                        {
+                            DebugService.Log($"Analyzing lazer replay: {s.ReplayHash}", "LazerImportService");
+                            var analysis = MissAnalysisService.Analyze(osuPath, replayPath);
+                            // UR from MissAnalysis is often more consistent if beatmap is fully available
+                            if (analysis.UR > 0) row.UR = analysis.UR;
+                            row.KeyRatio = analysis.KeyRatio;
+                            if (analysis.HitErrors.Count > 0) row.HitErrorsJson = System.Text.Json.JsonSerializer.Serialize(analysis.HitErrors);
+                            DebugService.Log($"Analysis complete: UR={analysis.UR:F2}, KeyRatio={analysis.KeyRatio:P1}", "LazerImportService");
+                        }
+                    } catch (Exception ex) {
+                         DebugService.Error($"Analysis failed for lazer replay {s.ReplayHash}: {ex.Message}", "LazerImportService");
+                    }
+                }
 
                 batchPlays.Add(row);
                 scoresAdded++;

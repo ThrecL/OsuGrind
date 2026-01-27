@@ -182,24 +182,58 @@ public class ApiServer : IDisposable
             case "/api/history/recent": await SendJson(response, await _db.FetchRecentAsync(GetQueryInt(context, "limit", 50))); break;
             case "/api/history":
                 var dateStr = context.Request.QueryString["date"];
-                if (DateTime.TryParse(dateStr, out var date))
+                if (!string.IsNullOrEmpty(dateStr))
                 {
-                    var plays = await _db.FetchPlaysRangeAsync(date.Date.ToUniversalTime(), date.Date.AddDays(1).ToUniversalTime());
+                    var plays = await _db.FetchPlaysByLocalDayAsync(dateStr);
                     var totalMs = plays.Sum(p => p.DurationMs);
                     await SendJson(response, new { plays, stats = new { plays = plays.Count, avgAccuracy = plays.Count > 0 ? plays.Average(p => p.Accuracy * 100) : 0, avgPP = plays.Count > 0 ? plays.Average(p => p.PP) : 0, duration = totalMs >= 3600000 ? $"{totalMs/3600000}h {(totalMs%3600000)/60000}m" : $"{totalMs/60000}m" } });
-                } else await SendJson(response, new { error = "Invalid date" }, 400);
+                } else await SendJson(response, new { error = "Date missing" }, 400);
                 break;
             case "/api/history/month": await SendJson(response, new { playCounts = await GetMonthPlayCountsAsync(GetQueryInt(context, "year", DateTime.Now.Year), GetQueryInt(context, "month", DateTime.Now.Month)) }); break;
             case "/api/analytics":
-                var days = GetQueryInt(context, "days", 30);
+                var periodStr = context.Request.QueryString["days"];
+                int days = 30;
+                if (periodStr == "today") days = -1;
+                else int.TryParse(periodStr, out days);
                 await SendJson(response, await GetAnalyticsDataAsync(days));
+                break;
+            case "/api/goals":
+                var progress = await _db.GetTodayGoalProgressAsync(SettingsManager.Current.GoalStars);
+                await SendJson(response, new { 
+                    settings = new {
+                        plays = SettingsManager.Current.GoalPlays,
+                        hits = SettingsManager.Current.GoalHits,
+                        stars = SettingsManager.Current.GoalStars,
+                        pp = SettingsManager.Current.GoalPP
+                    },
+                    progress = new {
+                        plays = progress.Plays,
+                        hits = progress.Hits,
+                        stars = progress.StarPlays,
+                        pp = progress.TotalPP
+                    }
+                });
+                break;
+            case "/api/goals/save":
+                if (method == "POST") {
+                    var payload = await ReadJsonBodyAsync<Dictionary<string, object>>(context.Request);
+                    if (payload != null) {
+                        if (payload.TryGetValue("plays", out var gp)) SettingsManager.Current.GoalPlays = TryGetInt(gp);
+                        if (payload.TryGetValue("hits", out var gh)) SettingsManager.Current.GoalHits = TryGetInt(gh);
+                        if (payload.TryGetValue("stars", out var gs)) SettingsManager.Current.GoalStars = TryGetDouble(gs);
+                        if (payload.TryGetValue("pp", out var gpp)) SettingsManager.Current.GoalPP = TryGetInt(gpp);
+                        SettingsManager.Save();
+                        await BroadcastRefresh();
+                        await SendJson(response, new { success = true });
+                    } else await SendJson(response, new { error = "Invalid payload" }, 400);
+                }
                 break;
             case "/api/import/lazer": 
                 if (method == "POST") { 
                     var importService = new LazerImportService(_db);
                     var (added, skipped, error) = await importService.ImportScoresAsync(SettingsManager.Current.LazerPath, SettingsManager.Current.Username); 
                     if (error != null) { DebugService.Log($"[LazerImport] Failed: {error}", "ApiServer"); await SendJson(response, new { success = false, message = error }, 400); }
-                    else await SendJson(response, new { success = true, count = added, skipped }); 
+                    else { await _db.MigrateAsync(); await BroadcastRefresh(); await SendJson(response, new { success = true, count = added, skipped }); }
                 } 
                 break;
             case "/api/import/stable":
@@ -208,7 +242,7 @@ public class ApiServer : IDisposable
                     var aliases = context.Request.QueryString["aliases"];
                     var (added, skipped, error) = await importService.ImportScoresAsync(SettingsManager.Current.StablePath, SettingsManager.Current.Username, aliases);
                     if (!string.IsNullOrEmpty(error)) { DebugService.Log($"[StableImport] Failed: {error}", "ApiServer"); await SendJson(response, new { success = false, message = error }, 400); }
-                    else await SendJson(response, new { success = true, count = added, skipped });
+                    else { await _db.MigrateAsync(); await BroadcastRefresh(); await SendJson(response, new { success = true, count = added, skipped }); }
                 }
                 break;
             case "/api/settings":
@@ -216,7 +250,7 @@ public class ApiServer : IDisposable
                 else if (method == "POST") { var payload = await ReadJsonBodyAsync<Dictionary<string, object>>(context.Request); if (payload != null) { SettingsManager.UpdateFromDictionary(payload); await SendJson(response, new { success = true }); } else await SendJson(response, new { error = "Invalid settings" }, 400); }
                 break;
             case "/api/settings/delete-scores":
-                if (method == "POST") { await _db.DeleteAllScoresAsync(); await SendJson(response, new { success = true }); }
+                if (method == "POST") { await _db.DeleteAllScoresAsync(); await BroadcastRefresh(); await SendJson(response, new { success = true }); }
                 break;
             case "/api/settings/delete-beatmaps":
                 if (method == "POST") { await _db.DeleteAllBeatmapsAsync(); await SendJson(response, new { success = true }); }
@@ -228,6 +262,7 @@ public class ApiServer : IDisposable
                     using var cmd = conn.CreateCommand();
                     cmd.CommandText = "DELETE FROM plays WHERE score = 0";
                     await cmd.ExecuteNonQueryAsync();
+                    await BroadcastRefresh();
                     await SendJson(response, new { success = true }); 
                 }
                 break;
@@ -255,7 +290,8 @@ public class ApiServer : IDisposable
                     var profile = await _authService.GetUserProfileAsync(token);
                     if (profile != null) { 
                         var p = profile.Value;
-                        double pp = 0; double acc = 0; int pc = 0; int gr = 0; int cr = 0; int mc = 0;
+                        double pp = 0; double acc = 0; int pc = 0; int gr = 0; int cr = 0; int mc = 0; int uid = 0;
+                        if (p.TryGetProperty("id", out var idP)) uid = idP.GetInt32();
                         if (p.TryGetProperty("statistics", out var stats)) {
                             if (stats.TryGetProperty("pp", out var ppP)) pp = ppP.GetDouble();
                             if (stats.TryGetProperty("hit_accuracy", out var acP)) acc = acP.GetDouble();
@@ -266,16 +302,27 @@ public class ApiServer : IDisposable
                         }
                         var username = p.TryGetProperty("username", out var un) ? un.GetString() : null;
                         if (!string.IsNullOrEmpty(username)) { SettingsManager.Current.Username = username; SettingsManager.Current.PeakPP = Math.Max(SettingsManager.Current.PeakPP, pp); SettingsManager.Save(); }
-                        await SendJson(response, new { isLoggedIn = true, username, avatarUrl = p.TryGetProperty("avatar_url", out var av) ? av.GetString() : null, coverUrl = p.TryGetProperty("cover", out var cov) && cov.TryGetProperty("url", out var curl) ? curl.GetString() : null, globalRank = gr, countryRank = cr, pp, accuracy = acc, playCount = pc, maxCombo = mc }); 
+                        await SendJson(response, new { isLoggedIn = true, userId = uid, username, avatarUrl = p.TryGetProperty("avatar_url", out var av) ? av.GetString() : null, coverUrl = p.TryGetProperty("cover", out var cov) && cov.TryGetProperty("url", out var curl) ? curl.GetString() : null, globalRank = gr, countryRank = cr, pp, accuracy = acc, playCount = pc, maxCombo = mc }); 
                         return; 
                     }
                 }
                 await SendJson(response, new { isLoggedIn = false });
                 break;
+            case "/api/profile/top":
+                string? topToken = SettingsManager.Current.AccessToken;
+                if (!string.IsNullOrEmpty(topToken)) {
+                    var profile = await _authService.GetUserProfileAsync(topToken);
+                    if (profile != null && profile.Value.TryGetProperty("id", out var idP)) {
+                        var topScores = await _authService.GetUserTopScoresAsync(topToken, idP.GetInt32());
+                        if (topScores != null) { await SendJson(response, topScores); return; }
+                    }
+                }
+                await SendJson(response, new { error = "Not logged in or failed to fetch" }, 401);
+                break;
             default:
                 if (path.StartsWith("/api/play/")) {
                     var id = ExtractIdFromPath(path, "/api/play/");
-                    if (method == "DELETE") { await _db.DeletePlayAsync(id); await SendJson(response, new { success = true }); }
+                    if (method == "DELETE") { await _db.DeletePlayAsync(id); await BroadcastRefresh(); await SendJson(response, new { success = true }); }
                     else if (path.EndsWith("/notes") && method == "POST") {
                         var payload = await ReadJsonBodyAsync<Dictionary<string, string>>(context.Request);
                         if (payload != null && payload.TryGetValue("notes", out var notes)) { await _db.UpdatePlayNotesAsync(id, notes); await SendJson(response, new { success = true }); }
@@ -303,38 +350,58 @@ public class ApiServer : IDisposable
     private async Task<object> GetAnalyticsDataAsync(int days)
     {
         var summary = await _db.GetAnalyticsSummaryAsync(days);
-        var daily = await _db.GetDailyStatsAsync(days);
+        var daily = (days == -1) ? await _db.GetHourlyStatsTodayAsync() : await _db.GetDailyStatsAsync(days);
+        var playsToday = await _db.GetPlaysTodayCountAsync();
+        var streak = await _db.GetPlayStreakAsync();
         
         var recentSummary = await _db.GetAnalyticsSummaryAsync(7);
-        var baselineSummary = await _db.GetAnalyticsSummaryAsync(30);
+        var baselineSummary = await _db.GetAnalyticsSummaryAsync(90); // 90 days for better baseline
         
         string form = "No Data";
         if (summary.TotalPlays > 0)
         {
-            form = "Stable";
-            if (recentSummary.AvgPP > baselineSummary.AvgPP * 1.05) form = "Peak";
-            else if (recentSummary.AvgPP > baselineSummary.AvgPP * 1.01) form = "Improving";
-            else if (recentSummary.AvgPP < baselineSummary.AvgPP * 0.95) form = "Slumping";
-            else if (recentSummary.AvgPP < baselineSummary.AvgPP * 0.99) form = "Fatigued";
+            double rPP = recentSummary.AvgPP;
+            double bPP = baselineSummary.AvgPP;
+            
+            if (rPP > bPP * 1.10) form = "Peak";
+            else if (rPP > bPP * 1.03) form = "Improving";
+            else if (rPP < bPP * 0.90) form = "Burnout";
+            else if (rPP < bPP * 0.96) form = "Slumping";
+            else form = "Stable";
         }
 
+        // IMPROVED MENTALITY FORMULA
+        // Factors: Pass Rate (Focus), Accuracy (Precision), and Play Density
         double mentality = 0; 
         if (summary.TotalPlays > 0)
         {
-            double passRate = (double)daily.Sum(d => d.PassCount) / summary.TotalPlays;
-            mentality = (passRate * 60.0) + (summary.AvgAccuracy * 40.0);
+            double passRate = (double)summary.TotalPlays > 0 ? (double)daily.Sum(d => d.PassCount) / summary.TotalPlays : 0;
+            double accFactor = summary.AvgAccuracy; // Already 0.0 to 1.0
+            
+            // Density Factor: Reward sessions with consistent play time
+            double hoursPlayed = summary.TotalDurationMs / 3600000.0;
+            double density = Math.Min(1.0, summary.TotalPlays / (hoursPlayed * 10 + 1)); // Target ~10 plays per hour
+
+            mentality = (passRate * 50.0) + (accFactor * 40.0) + (density * 10.0);
         }
 
         double peakPP = SettingsManager.Current.PeakPP;
-        if (peakPP <= 0) peakPP = daily.Any() ? daily.Max(d => d.AvgPP) : 1;
-        if (peakPP <= 0) peakPP = 1;
+        // Fallback: use the best daily average ever recorded in the DB
+        var allDaily = await _db.GetDailyStatsAsync(0);
+        double recordDailyAvg = allDaily.Any() ? allDaily.Max(d => d.AvgPP) : 1;
+        double referencePP = Math.Max(peakPP, recordDailyAvg);
+        if (referencePP <= 0) referencePP = 1;
 
         return new {
             totalPlays = summary.TotalPlays,
             totalMinutes = summary.TotalDurationMs / 60000.0,
             avgAccuracy = summary.AvgAccuracy,
             avgPP = summary.AvgPP,
-            perfMatch = summary.TotalPlays > 0 ? (summary.AvgPP / peakPP) * 100.0 : 0,
+            avgUR = summary.AvgUR,
+            avgKeyRatio = summary.AvgKeyRatio,
+            playsToday = playsToday,
+            streak = streak,
+            perfMatch = summary.TotalPlays > 0 ? (summary.AvgPP / referencePP) * 100.0 : 0,
             currentForm = form,
             mentality = Math.Clamp(mentality, 0, 100),
             dailyActivity = daily.Select(d => new {
@@ -342,21 +409,66 @@ public class ApiServer : IDisposable
                 plays = d.PlayCount,
                 minutes = d.TotalDurationMs / 60000.0,
                 avgPP = d.AvgPP,
-                avgAcc = d.AvgAcc * 100.0
+                avgAcc = d.AvgAcc * 100.0,
+                avgUR = d.AvgUR,
+                avgKeyRatio = d.AvgKeyRatio
             }),
             dailyPerformance = daily.Select(d => new {
                 date = d.Date,
                 match = (d.AvgPP / peakPP) * 100.0
-            })
+            }),
+            hitErrors = await GetRecentHitErrorsAsync(days)
         };
     }
 
-    private async Task<Dictionary<string, int>> GetMonthPlayCountsAsync(int y, int m) { var p = await _db.FetchPlaysRangeAsync(new DateTime(y, m, 1).ToUniversalTime(), new DateTime(y, m, 1).AddMonths(1).ToUniversalTime()); return p.GroupBy(x => x.CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd")).ToDictionary(g => g.Key, g => g.Count()); }
-    private async Task ServeStaticFile(HttpListenerContext context, string path) { if (path == "/") path = "/index.html"; var local = ResolveStaticPath(path); if (File.Exists(local)) { context.Response.Headers["Cache-Control"] = "no-store"; var buf = await File.ReadAllBytesAsync(local); context.Response.ContentType = GetContentType(Path.GetExtension(local)); await context.Response.OutputStream.WriteAsync(buf, 0, buf.Length); context.Response.Close(); } else await SendJson(context.Response, new { error = "Not found" }, 404); }
+    private async Task<List<double>> GetRecentHitErrorsAsync(int days)
+    {
+        using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OsuGrind", "osugrind.sqlite")}");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        string filter = days > 0 ? "WHERE created_at_utc >= datetime('now', $offset) AND hit_errors IS NOT NULL" : "WHERE hit_errors IS NOT NULL";
+        int limit = days > 0 ? 100 : 2000; // Sample more data for "ALL"
+        cmd.CommandText = $"SELECT hit_errors FROM plays {filter} ORDER BY created_at_utc DESC LIMIT {limit}";
+        if (days > 0) cmd.Parameters.AddWithValue("$offset", $"-{days} days");
+        var errors = new List<double>();
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            try {
+                var json = reader.GetString(0);
+                var list = JsonSerializer.Deserialize<List<double>>(json);
+                if (list != null) errors.AddRange(list);
+            } catch {}
+        }
+        return errors;
+    }
+
+    private async Task<Dictionary<string, int>> GetMonthPlayCountsAsync(int y, int m) 
+    { 
+        return await _db.GetMonthPlayCountsAsync(y, m); 
+    }
+
+    private async Task ServeStaticFile(HttpListenerContext context, string path) 
+    { 
+        if (path == "/") path = "/index.html"; 
+        var local = ResolveStaticPath(path); 
+        if (File.Exists(local)) 
+        { 
+            context.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0";
+            context.Response.Headers["Pragma"] = "no-cache";
+            context.Response.Headers["Expires"] = "0";
+            var buf = await File.ReadAllBytesAsync(local); 
+            context.Response.ContentType = GetContentType(Path.GetExtension(local)); 
+            await context.Response.OutputStream.WriteAsync(buf, 0, buf.Length); 
+            context.Response.Close(); 
+        } 
+        else await SendJson(context.Response, new { error = "Not found" }, 404); 
+    }
     private string ResolveStaticPath(string path) { var rel = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar); var p = Path.Combine(_webRoot, rel); if (File.Exists(p)) return p; if (rel.Equals("favicon.ico", StringComparison.OrdinalIgnoreCase)) return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "WebUI", "rewind", "favicon.ico"); if (rel.StartsWith("assets" + Path.DirectorySeparatorChar + "mods")) return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Assets", "Mods", rel.Substring(12)); return p; }
     private async Task HandleWebSocket(HttpListenerContext context) { var ws = (await context.AcceptWebSocketAsync(null)).WebSocket; lock (_clientsLock) _liveClients.Add(ws); try { while (ws.State == WebSocketState.Open) await ws.ReceiveAsync(new ArraySegment<byte>(new byte[1024]), _cts.Token); } finally { lock (_clientsLock) _liveClients.Remove(ws); } }
     public async Task BroadcastLog(string message, string level = "info") => await Broadcast(JsonSerializer.Serialize(new { type = "log", message, level }));
     public async Task BroadcastLiveData(object data) => await Broadcast(JsonSerializer.Serialize(new { type = "live", data }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    public async Task BroadcastRefresh() => await Broadcast(JsonSerializer.Serialize(new { type = "refresh" }));
     private async Task Broadcast(string payload) { var bytes = Encoding.UTF8.GetBytes(payload); WebSocket[] clients; lock (_clientsLock) clients = _liveClients.Where(c => c.State == WebSocketState.Open).ToArray(); foreach (var c in clients) try { await c.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None); } catch { } }
     private int GetQueryInt(HttpListenerContext context, string key, int def) => int.TryParse(context.Request.QueryString[key], out var r) ? r : def;
     private int ExtractIdFromPath(string path, string prefix) { var rest = path.Substring(prefix.Length); var slash = rest.IndexOf('/'); return int.TryParse(slash >= 0 ? rest.Substring(0, slash) : rest, out var id) ? id : 0; }
@@ -365,6 +477,7 @@ public class ApiServer : IDisposable
     private static async Task<T?> ReadJsonBodyAsync<T>(HttpListenerRequest request) { using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8); var body = await reader.ReadToEndAsync(); return string.IsNullOrWhiteSpace(body) ? default : JsonSerializer.Deserialize<T>(body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
     private static string BuildReplayData(Replay replay) { var sb = new StringBuilder(); var cur = 0; foreach (var f in replay.ReplayFrames ?? new List<OsuParsers.Replays.Objects.ReplayFrame>()) { var diff = f.TimeDiff == 0 && f.Time > 0 ? f.Time - cur : f.TimeDiff; cur += diff; sb.Append($"{diff}|{f.X.ToString(CultureInfo.InvariantCulture)}|{f.Y.ToString(CultureInfo.InvariantCulture)}|{GetActionMask(f, replay.Ruleset)},"); } return sb.ToString(); }
     private static int GetActionMask(OsuParsers.Replays.Objects.ReplayFrame f, Ruleset r) => r switch { Ruleset.Taiko => (int)f.TaikoKeys, Ruleset.Fruits => (int)f.CatchKeys, Ruleset.Mania => (int)f.ManiaKeys, _ => (int)f.StandardKeys };
+
 
     private async Task HandleRewindRequest(HttpListenerContext context, int id)
     {
@@ -540,6 +653,28 @@ public class ApiServer : IDisposable
         if (match != null) return match;
         var norm = difficulty.Replace(" ", "").Trim();
         return files.FirstOrDefault(n => n?.Replace(" ", "").Contains(norm, StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    private static int TryGetInt(object? val)
+    {
+        if (val == null) return 0;
+        if (val is int i) return i;
+        if (val is long l) return (int)l;
+        if (val is JsonElement je) return je.TryGetInt32(out int result) ? result : 0;
+        int.TryParse(val.ToString(), out int r);
+        return r;
+    }
+
+    private static double TryGetDouble(object? val)
+    {
+        if (val == null) return 0;
+        if (val is double d) return d;
+        if (val is float f) return f;
+        if (val is long l) return (double)l;
+        if (val is int i) return (double)i;
+        if (val is JsonElement je) return je.TryGetDouble(out double result) ? result : 0;
+        double.TryParse(val.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double r);
+        return r;
     }
 
     public void Dispose() { Stop(); _cts.Dispose(); }

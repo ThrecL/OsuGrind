@@ -6,6 +6,7 @@
 class AnalyticsModule {
     constructor() {
         this.mainChart = null;
+        this.histChart = null;
         this.loaded = false;
         this.currentPeriod = 30;
         this.currentMetric = 'pp';
@@ -21,7 +22,8 @@ class AnalyticsModule {
         // Period buttons
         document.querySelectorAll('.period-selector .p-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                this.currentPeriod = parseInt(e.target.dataset.days);
+                const days = e.target.dataset.days;
+                this.currentPeriod = days === "today" ? "today" : parseInt(days);
                 this.updateActiveButton('.period-selector', e.target);
                 this.refresh(true);
             });
@@ -30,7 +32,9 @@ class AnalyticsModule {
         // Metric buttons
         document.querySelectorAll('.metric-selector .p-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                this.currentMetric = e.target.dataset.metric;
+                const metric = e.target.closest('.p-btn').dataset.metric;
+                console.log('[Analytics] Switching to metric:', metric);
+                this.currentMetric = metric;
                 this.updateActiveButton('.metric-selector', e.target);
                 if (this.rawData) this.renderMainChart();
             });
@@ -66,6 +70,15 @@ class AnalyticsModule {
         document.getElementById('totalTime').textContent = this.formatDuration(data.totalMinutes || 0);
         document.getElementById('avgAcc').textContent = `${((data.avgAccuracy || 0) * 100).toFixed(2)}%`;
         document.getElementById('avgPP').textContent = Math.round(data.avgPP || 0);
+        document.getElementById('avgUR').textContent = (data.avgUR || 0).toFixed(2);
+
+        // Update top-left "Plays Today"
+        if (window.app && data.playsToday !== undefined) {
+            window.app.updatePlaysToday(data.playsToday);
+            if (data.streak !== undefined) {
+                window.app.updateStreak(data.streak);
+            }
+        }
 
         // Performance & Form
         const perfMatchEl = document.getElementById('perfMatch');
@@ -95,9 +108,31 @@ class AnalyticsModule {
         }
 
         const dailyData = this.rawData.dailyActivity || [];
-        const labels = dailyData.map(d => d.date);
-        
+        const labels = this.currentMetric === 'histogram' ? [] : dailyData.map(d => d.date);
         let datasets = [];
+        let type = 'line';
+        let options = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { 
+                    display: this.currentMetric === 'activity' || this.currentMetric === 'tapping',
+                    position: 'top',
+                    align: 'end',
+                    labels: { color: '#888', boxWidth: 12, font: { size: 10 } }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    ticks: { color: '#666', maxTicksLimit: 10 }
+                },
+                y: {
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    ticks: { color: '#888' }
+                }
+            }
+        };
 
         switch (this.currentMetric) {
             case 'pp':
@@ -139,6 +174,12 @@ class AnalyticsModule {
                     tension: 0.4,
                     yAxisID: 'y1'
                 });
+                options.scales.y1 = {
+                    display: true,
+                    position: 'right',
+                    grid: { drawOnChartArea: false },
+                    ticks: { color: '#888' }
+                };
                 break;
             case 'accuracy':
                 datasets.push({
@@ -150,42 +191,67 @@ class AnalyticsModule {
                     tension: 0.4
                 });
                 break;
+            case 'tapping':
+                datasets.push({
+                    label: 'Primary Key Share (%)',
+                    data: dailyData.map(d => d.avgKeyRatio * 100),
+                    borderColor: '#FF66AB',
+                    backgroundColor: 'rgba(255, 102, 171, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                });
+                datasets.push({
+                    label: 'Secondary Key Share (%)',
+                    data: dailyData.map(d => (1 - d.avgKeyRatio) * 100),
+                    borderColor: '#00FFFF',
+                    backgroundColor: 'transparent',
+                    borderDash: [5, 5],
+                    tension: 0.4
+                });
+                break;
+            case 'ur':
+                datasets.push({
+                    label: 'Unstable Rate',
+                    data: dailyData.map(d => d.avgUR),
+                    borderColor: '#00FFFF',
+                    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                });
+                break;
+            case 'histogram':
+                type = 'bar';
+                const errors = this.rawData.hitErrors || [];
+                const bins = {};
+                const binSize = 2;
+                for (let i = -100; i <= 100; i += binSize) bins[i] = 0;
+                errors.forEach(e => {
+                    const b = Math.round(e / binSize) * binSize;
+                    if (b >= -100 && b <= 100) bins[b]++;
+                });
+                const hLabels = Object.keys(bins).map(Number).sort((a,b) => a-b);
+                hLabels.forEach(l => labels.push(l));
+                datasets.push({
+                    label: 'Hits',
+                    data: hLabels.map(l => bins[l]),
+                    backgroundColor: hLabels.map(l => Math.abs(l) < 20 ? '#00FF88' : (Math.abs(l) < 40 ? '#FFD700' : '#FF3C78')),
+                    barPercentage: 1,
+                    categoryPercentage: 1
+                });
+                options.plugins.legend.display = false;
+                options.scales.x.title = { display: true, text: 'Offset (ms)', color: '#666' };
+                options.scales.x.ticks = { color: '#666', callback: (v, i) => hLabels[i] % 20 === 0 ? hLabels[i] : '' };
+                options.scales.y.ticks.display = false;
+                break;
         }
 
         this.mainChart = new Chart(ctx, {
-            type: 'line',
+            type: type,
             data: {
                 labels: labels,
                 datasets: datasets
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { 
-                        display: this.currentMetric === 'activity',
-                        position: 'top',
-                        align: 'end',
-                        labels: { color: '#888', boxWidth: 12, font: { size: 10 } }
-                    }
-                },
-                scales: {
-                    x: {
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                        ticks: { color: '#666', maxTicksLimit: 10 }
-                    },
-                    y: {
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                        ticks: { color: '#888' }
-                    },
-                    y1: {
-                        display: this.currentMetric === 'activity',
-                        position: 'right',
-                        grid: { drawOnChartArea: false },
-                        ticks: { color: '#888' }
-                    }
-                }
-            }
+            options: options
         });
     }
 

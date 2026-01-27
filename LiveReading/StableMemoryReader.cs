@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using OsuGrind.Models;
 using OsuGrind.Services;
+using OsuGrind.Api;
 
 namespace OsuGrind.LiveReading
 {
@@ -69,11 +70,11 @@ namespace OsuGrind.LiveReading
         public event Action<bool>? OnPlayRecorded;
         public LiveSnapshot? LastRecordedSnapshot => _detector.LastSnapshot;
 
-        public StableMemoryReader(TrackerDb db, SoundPlayer soundPlayer)
+        public StableMemoryReader(TrackerDb db, SoundPlayer soundPlayer, ApiServer api)
         {
             _db = db;
             _soundPlayer = soundPlayer;
-            _detector = new StableScoreDetector(db, soundPlayer);
+            _detector = new StableScoreDetector(db, soundPlayer, api);
             _detector.OnPlayRecorded += (success) => OnPlayRecorded?.Invoke(success);
         }
 
@@ -405,19 +406,25 @@ namespace OsuGrind.LiveReading
                         }
                     }
 
-                    if (snapshot.HitCounts != null && _rosuService != null && _rosuService.IsLoaded && snapshot.ModsList != null)
-                    {
-                        uint rosuMods = RosuService.ModsToRosuStats(snapshot.ModsList);
-                        double clockRate = RosuService.GetClockRateFromMods(rosuMods);
-                        int passed = snapshot.HitCounts.Count300 + snapshot.HitCounts.Count100 + snapshot.HitCounts.Count50 + snapshot.HitCounts.Misses;
-                        if (passed == 0) snapshot.PP = 0;
-                        else
+                        if (snapshot.HitCounts != null && _rosuService != null && _rosuService.IsLoaded && snapshot.ModsList != null)
                         {
-                            double ratio = _rosuService.TotalObjects > 0 ? (double)passed / _rosuService.TotalObjects : 0;
-                            int sliderEnds = (int)Math.Round(ratio * _rosuService.TotalSliders);
-                            snapshot.PP = _rosuService.CalculatePp(rosuMods, snapshot.MaxCombo ?? 0, snapshot.HitCounts.Count300, snapshot.HitCounts.Count100, snapshot.HitCounts.Count50, snapshot.HitCounts.Misses, passed, sliderEndHits: sliderEnds, clockRate: clockRate);
+                            uint rosuMods = RosuService.ModsToRosuStats(snapshot.ModsList);
+                            double clockRate = RosuService.GetClockRateFromMods(rosuMods);
+                            int passed = snapshot.HitCounts.Count300 + snapshot.HitCounts.Count100 + snapshot.HitCounts.Count50 + snapshot.HitCounts.Misses;
+
+                            if (_cachedStats != null && _cachedStats.TotalTimeMs > 0)
+                            {
+                                snapshot.Progress = Math.Clamp((double)(snapshot.TimeMs ?? 0) / _cachedStats.TotalTimeMs, 0, 1);
+                            }
+
+                            if (passed == 0) snapshot.PP = 0;
+                            else
+                            {
+                                double ratio = _rosuService.TotalObjects > 0 ? (double)passed / _rosuService.TotalObjects : 0;
+                                int sliderEnds = (int)Math.Round(ratio * _rosuService.TotalSliders);
+                                snapshot.PP = _rosuService.CalculatePp(rosuMods, snapshot.MaxCombo ?? 0, snapshot.HitCounts.Count300, snapshot.HitCounts.Count100, snapshot.HitCounts.Count50, snapshot.HitCounts.Misses, passed, sliderEndHits: sliderEnds, clockRate: clockRate);
+                            }
                         }
-                    }
                 }
                 _detector.Process(snapshot);
             }

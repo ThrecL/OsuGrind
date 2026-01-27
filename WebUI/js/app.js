@@ -22,11 +22,23 @@ class OsuGrindApp {
         window.api.connectLive();
 
         window.api.onLog((msg, level) => {
+            if (msg === undefined && level === undefined) return; // refresh signal check
             this.logToDebug(msg, level);
             const prefix = `[C#][${level}]`;
             if (level === 'ERROR' || level === 'EXCEPTION') console.error(prefix, msg);
             else if (level === 'WARN') console.warn(prefix, msg);
             else console.log(prefix, msg);
+        });
+
+        window.api.onLiveData((data) => {
+            if (data.type === 'refresh') {
+                console.log('[App] Refresh signal received');
+                if (window.historyModule) window.historyModule.resetToCalendar();
+                if (window.analyticsModule) window.analyticsModule.refresh(true);
+                if (window.goalsModule) window.goalsModule.refresh();
+                return;
+            }
+            window.liveModule?.update(data);
         });
 
         // Initialize each module
@@ -35,6 +47,10 @@ class OsuGrindApp {
         if (window.historyModule) window.historyModule.init();
         if (window.settingsModule) window.settingsModule.init();
         if (window.profileModule) window.profileModule.init();
+        if (window.goalsModule) window.goalsModule.init();
+
+        // Initial fetch for top-bar stats
+        if (window.analyticsModule) window.analyticsModule.refresh(true);
 
         // Listen for HUD updates from Rewind iframe
         window.addEventListener('message', (event) => {
@@ -186,9 +202,41 @@ class OsuGrindApp {
     }
 
     switchTab(tabName) {
+        const tabs = ['live', 'analytics', 'history', 'settings'];
+        const currentIndex = tabs.indexOf(this.currentTab);
+        const newIndex = tabs.indexOf(tabName);
+        
+        // Determine direction
+        const direction = newIndex > currentIndex ? 'right' : 'left';
+        
+        // Get current and new tab content
+        const currentContent = document.getElementById(`tab-${this.currentTab}`);
+        const newContent = document.getElementById(`tab-${tabName}`);
+        
+        // Add exiting animation to current tab
+        if (currentContent && currentContent.classList.contains('active')) {
+            currentContent.classList.add('exiting');
+            setTimeout(() => {
+                currentContent.classList.remove('active', 'exiting', 'from-left');
+            }, 200);
+        }
+        
+        // Update tab buttons
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
-        document.querySelectorAll('.tab-content').forEach(content => content.classList.toggle('active', content.id === `tab-${tabName}`));
+        
+        // Show new tab with direction-aware animation
+        setTimeout(() => {
+            if (newContent) {
+                newContent.classList.add('active');
+                if (direction === 'left') {
+                    newContent.classList.add('from-left');
+                }
+            }
+        }, 100);
+        
         this.currentTab = tabName;
+        
+        // Trigger module refresh
         if (tabName === 'analytics' && window.analyticsModule) window.analyticsModule.refresh();
         if (tabName === 'history' && window.historyModule) window.historyModule.refresh();
     }
@@ -197,7 +245,12 @@ class OsuGrindApp {
         document.getElementById('minimizeBtn')?.addEventListener('click', () => window.chrome?.webview?.postMessage({ action: 'minimize' }));
         document.getElementById('maximizeBtn')?.addEventListener('click', () => window.chrome?.webview?.postMessage({ action: 'maximize' }));
         document.getElementById('closeBtn')?.addEventListener('click', () => window.chrome?.webview?.postMessage({ action: 'close' }));
-        document.getElementById('settingsBtn')?.addEventListener('click', () => this.switchTab('settings'));
+        document.getElementById('settingsBtn')?.addEventListener('click', () => {
+            const btn = document.getElementById('settingsBtn');
+            btn.classList.add('active');
+            setTimeout(() => btn.classList.remove('active'), 600);
+            this.switchTab('settings');
+        });
         
         const titlebar = document.getElementById('titlebar');
         if (titlebar) {
@@ -231,8 +284,8 @@ class OsuGrindApp {
     }
 
     setPlaying(isPlaying) { this.isPlaying = isPlaying; }
-    updatePlays24h(count) {
-        const el = document.getElementById('plays24h');
+    updatePlaysToday(count) {
+        const el = document.getElementById('playsToday');
         if (el) el.textContent = `${count} play${count !== 1 ? 's' : ''}`;
     }
     updateStreak(days) {

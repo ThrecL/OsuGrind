@@ -55,9 +55,11 @@ public partial class WebViewWindow : Window
 
         // Initialize services
 
+        _cts = new CancellationTokenSource();
         _db = new TrackerDb();
         _soundPlayer = new SoundPlayer();
-        _osuReader = new UnifiedOsuReader(_db, _soundPlayer);
+        _apiServer = new ApiServer(_db);
+        _osuReader = new UnifiedOsuReader(_db, _soundPlayer, _apiServer);
         _osuReader.OnPlayRecorded += (success) =>
         {
             Dispatcher.Invoke(() =>
@@ -69,9 +71,7 @@ public partial class WebViewWindow : Window
                 }
             });
         };
-        _apiServer = new ApiServer(_db);
 
-        _cts = new CancellationTokenSource();
 
         // Forward global debug logs to WebView console AND WebSocket clients
         DebugService.OnMessageLogged += (msg, source, level) =>

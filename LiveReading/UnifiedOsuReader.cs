@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using OsuGrind.Models;
 using OsuGrind.Services;
+using OsuGrind.Api;
 
 namespace OsuGrind.LiveReading
 {
@@ -23,12 +24,12 @@ namespace OsuGrind.LiveReading
         public event Action<bool>? OnPlayRecorded;
         public LiveSnapshot? LastRecordedSnapshot => _activeReader?.LastRecordedSnapshot;
 
-        public UnifiedOsuReader(TrackerDb db, SoundPlayer soundPlayer)
+        public UnifiedOsuReader(TrackerDb db, SoundPlayer soundPlayer, ApiServer api)
         {
             _db = db;
             _soundPlayer = soundPlayer;
-            _lazerReader = new LazerMemoryReader(db, soundPlayer);
-            _stableReader = new StableMemoryReader(db, soundPlayer);
+            _lazerReader = new LazerMemoryReader(db, soundPlayer, api);
+            _stableReader = new StableMemoryReader(db, soundPlayer, api);
             
             _lazerReader.OnPlayRecorded += (success) => OnPlayRecorded?.Invoke(success);
             _stableReader.OnPlayRecorded += (success) => OnPlayRecorded?.Invoke(success);

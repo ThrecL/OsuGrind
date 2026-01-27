@@ -63,7 +63,10 @@ public class TrackerDb
           replay_file TEXT NOT NULL DEFAULT '',
            replay_hash TEXT NOT NULL DEFAULT '',
            pp_timeline TEXT NOT NULL DEFAULT '',
-           map_path TEXT NOT NULL DEFAULT ''
+           map_path TEXT NOT NULL DEFAULT '',
+           hit_errors TEXT,
+           key_press_avg REAL DEFAULT 0,
+           key_ratio REAL DEFAULT 0
          );
         CREATE TABLE IF NOT EXISTS beatmaps (
           hash TEXT PRIMARY KEY,
@@ -106,6 +109,11 @@ public class TrackerDb
         await EnsureColumnAsync(conn, "plays", "replay_file", "ALTER TABLE plays ADD COLUMN replay_file TEXT NOT NULL DEFAULT '';");
 
         await EnsureColumnAsync(conn, "plays", "replay_hash", "ALTER TABLE plays ADD COLUMN replay_hash TEXT NOT NULL DEFAULT '';");
+        
+        await EnsureColumnAsync(conn, "plays", "hit_errors", "ALTER TABLE plays ADD COLUMN hit_errors TEXT;");
+        await EnsureColumnAsync(conn, "plays", "key_press_avg", "ALTER TABLE plays ADD COLUMN key_press_avg REAL DEFAULT 0;");
+        await EnsureColumnAsync(conn, "plays", "key_ratio", "ALTER TABLE plays ADD COLUMN key_ratio REAL DEFAULT 0;");
+
         await EnsureColumnAsync(conn, "beatmaps", "background_hash", "ALTER TABLE beatmaps ADD COLUMN background_hash TEXT;");
         await EnsureColumnAsync(conn, "beatmaps", "osu_file_path", "ALTER TABLE beatmaps ADD COLUMN osu_file_path TEXT;");
         await EnsureColumnAsync(conn, "beatmaps", "play_count", "ALTER TABLE beatmaps ADD COLUMN play_count INTEGER;");
@@ -132,8 +140,8 @@ public class TrackerDb
         using var conn = Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-        INSERT OR IGNORE INTO plays (score_id, created_at_utc, outcome, duration_ms, beatmap, beatmap_hash, mods, stars, accuracy, score, combo, count300, count100, count50, misses, pp, rank, hit_offsets, timeline, pp_timeline, aim_offsets, cursor_offsets, ur, replay_file, replay_hash, map_path)
-        VALUES ($score_id, $created_at_utc, $outcome, $duration_ms, $beatmap, $beatmap_hash, $mods, $stars, $accuracy, $score, $combo, $count300, $count100, $count50, $misses, $pp, $rank, $hit_offsets, $timeline, $pp_timeline, $aim_offsets, $cursor_offsets, $ur, $replay_file, $replay_hash, $map_path);
+        INSERT OR IGNORE INTO plays (score_id, created_at_utc, outcome, duration_ms, beatmap, beatmap_hash, mods, stars, accuracy, score, combo, count300, count100, count50, misses, pp, rank, hit_offsets, timeline, pp_timeline, aim_offsets, cursor_offsets, ur, replay_file, replay_hash, map_path, hit_errors, key_ratio)
+        VALUES ($score_id, $created_at_utc, $outcome, $duration_ms, $beatmap, $beatmap_hash, $mods, $stars, $accuracy, $score, $combo, $count300, $count100, $count50, $misses, $pp, $rank, $hit_offsets, $timeline, $pp_timeline, $aim_offsets, $cursor_offsets, $ur, $replay_file, $replay_hash, $map_path, $hit_errors, $key_ratio);
         """;
 
         cmd.Parameters.AddWithValue("$score_id", row.ScoreId);
@@ -162,6 +170,8 @@ public class TrackerDb
         cmd.Parameters.AddWithValue("$replay_file", row.ReplayFile ?? "");
         cmd.Parameters.AddWithValue("$replay_hash", row.ReplayHash ?? "");
         cmd.Parameters.AddWithValue("$map_path", row.MapPath ?? "");
+        cmd.Parameters.AddWithValue("$hit_errors", row.HitErrorsJson ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("$key_ratio", row.KeyRatio);
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -169,7 +179,7 @@ public class TrackerDb
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"{PlaysSelectQuery} ORDER BY p.created_at_utc DESC LIMIT $limit";
+        cmd.CommandText = $"{PlaysSelectQuery} WHERE p.score > 0 ORDER BY p.created_at_utc DESC LIMIT $limit";
         cmd.Parameters.AddWithValue("$limit", limit);
         var list = new List<PlayRow>();
         using var reader = await cmd.ExecuteReaderAsync();
@@ -181,9 +191,21 @@ public class TrackerDb
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"{PlaysSelectQuery} WHERE p.created_at_utc >= $s AND p.created_at_utc < $e ORDER BY p.created_at_utc DESC";
+        cmd.CommandText = $"{PlaysSelectQuery} WHERE p.score > 0 AND p.created_at_utc >= $s AND p.created_at_utc < $e ORDER BY p.created_at_utc DESC";
         cmd.Parameters.AddWithValue("$s", startUtc.ToString("O", CultureInfo.InvariantCulture));
         cmd.Parameters.AddWithValue("$e", endUtc.ToString("O", CultureInfo.InvariantCulture));
+        var list = new List<PlayRow>();
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) list.Add(MapPlayRow(reader));
+        return list;
+    }
+
+    public async Task<List<PlayRow>> FetchPlaysByLocalDayAsync(string localDateYMD)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"{PlaysSelectQuery} WHERE p.score > 0 AND date(p.created_at_utc, 'localtime') = $d ORDER BY p.created_at_utc DESC";
+        cmd.Parameters.AddWithValue("$d", localDateYMD);
         var list = new List<PlayRow>();
         using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync()) list.Add(MapPlayRow(reader));
@@ -288,21 +310,151 @@ public class TrackerDb
         return new DailyAverageStats(0, 0);
     }
 
+    public async Task<int> GetPlaysTodayCountAsync()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM plays WHERE score > 0 AND date(created_at_utc, 'localtime') = date('now', 'localtime')";
+        var result = await cmd.ExecuteScalarAsync();
+        return Convert.ToInt32(result ?? 0);
+    }
+
+    public async Task<GoalProgress> GetTodayGoalProgressAsync(double starThreshold)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            SELECT 
+                COUNT(*),
+                SUM(count300 + count100 + count50 + misses),
+                SUM(CASE WHEN stars >= $star THEN 1 ELSE 0 END),
+                SUM(pp)
+            FROM plays 
+            WHERE score > 0 AND date(created_at_utc, 'localtime') = date('now', 'localtime')
+        """;
+        cmd.Parameters.AddWithValue("$star", starThreshold);
+
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            return new GoalProgress(
+                reader.IsDBNull(0) ? 0 : reader.GetInt32(0),
+                reader.IsDBNull(1) ? 0 : reader.GetInt32(1),
+                reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                reader.IsDBNull(3) ? 0 : reader.GetDouble(3)
+            );
+        }
+        return new GoalProgress(0, 0, 0, 0);
+    }
+
+    public record GoalProgress(int Plays, int Hits, int StarPlays, double TotalPP);
+
+    public async Task<List<DailyStats>> GetHourlyStatsTodayAsync()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            SELECT strftime('%H:00', created_at_utc, 'localtime') as h, 
+                   COUNT(1), 
+                   SUM(CASE WHEN outcome = 'pass' THEN 1 ELSE 0 END),
+                   SUM(pp),
+                   SUM(duration_ms),
+                   SUM(accuracy),
+                   AVG(ur),
+                   AVG(key_ratio)
+            FROM plays 
+            WHERE score > 0 AND date(created_at_utc, 'localtime') = date('now', 'localtime')
+            GROUP BY h
+            ORDER BY h ASC
+        """;
+        
+        var list = new List<DailyStats>();
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            list.Add(new DailyStats
+            {
+                Date = reader.GetString(0), // Using Date field for Hour label
+                PlayCount = reader.GetInt32(1),
+                PassCount = reader.GetInt32(2),
+                TotalPP = reader.IsDBNull(3) ? 0 : reader.GetDouble(3),
+                TotalDurationMs = reader.IsDBNull(4) ? 0 : reader.GetInt64(4),
+                TotalAccuracy = reader.IsDBNull(5) ? 0 : reader.GetDouble(5),
+                AvgUR = reader.IsDBNull(6) ? 0 : reader.GetDouble(6),
+                AvgKeyRatio = reader.IsDBNull(7) ? 0 : reader.GetDouble(7)
+            });
+        }
+        return list;
+    }
+
+    public async Task<int> GetPlayStreakAsync()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        // Fetch all distinct dates with plays in local time, sorted descending
+        cmd.CommandText = "SELECT DISTINCT date(created_at_utc, 'localtime') as d FROM plays WHERE score > 0 ORDER BY d DESC";
+        
+        var dates = new List<DateTime>();
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            if (DateTime.TryParse(reader.GetString(0), out var dt))
+                dates.Add(dt.Date);
+        }
+
+        if (dates.Count == 0) return 0;
+
+        var today = DateTime.Now.Date;
+        var yesterday = today.AddDays(-1);
+
+        // If the most recent play is older than yesterday, streak is broken
+        if (dates[0] < yesterday) return 0;
+
+        int streak = 0;
+        var current = today;
+        
+        // If today has no plays, start checking from yesterday
+        if (dates[0] == yesterday) current = yesterday;
+        else if (dates[0] != today) return 0; // Should be covered by < yesterday check
+
+        foreach (var date in dates)
+        {
+            if (date == current)
+            {
+                streak++;
+                current = current.AddDays(-1);
+            }
+            else break;
+        }
+
+        return streak;
+    }
+
     public async Task<AnalyticsSummary> GetAnalyticsSummaryAsync(int days)
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        string timeFilter = days > 0 ? "WHERE created_at_utc >= datetime('now', $offset)" : "";
+        string timeFilter = "";
+        if (days == -1) // TODAY
+        {
+            timeFilter = "AND date(created_at_utc, 'localtime') = date('now', 'localtime')";
+        }
+        else if (days > 0)
+        {
+            timeFilter = $"AND created_at_utc >= datetime('now', '-{days} days')";
+        }
+
         cmd.CommandText = $"""
             SELECT 
                 COUNT(1),
                 SUM(duration_ms),
                 AVG(pp),
-                AVG(accuracy)
+                AVG(accuracy),
+                AVG(ur),
+                AVG(key_ratio)
             FROM plays 
-            {timeFilter}
+            WHERE score > 0 {timeFilter}
         """;
-        if (days > 0) cmd.Parameters.AddWithValue("$offset", $"-{days} days");
 
         using var reader = await cmd.ExecuteReaderAsync();
         if (await reader.ReadAsync())
@@ -311,30 +463,46 @@ public class TrackerDb
                 reader.IsDBNull(0) ? 0 : reader.GetInt32(0),
                 reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
                 reader.IsDBNull(2) ? 0 : reader.GetDouble(2),
-                reader.IsDBNull(3) ? 0 : reader.GetDouble(3)
+                reader.IsDBNull(3) ? 0 : reader.GetDouble(3),
+                reader.IsDBNull(4) ? 0 : reader.GetDouble(4),
+                reader.IsDBNull(5) ? 0 : reader.GetDouble(5)
             );
         }
-        return new AnalyticsSummary(0, 0, 0, 0);
+        return new AnalyticsSummary(0, 0, 0, 0, 0, 0);
     }
 
     public async Task<List<DailyStats>> GetDailyStatsAsync(int days)
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        string timeFilter = days > 0 ? "WHERE created_at_utc >= datetime('now', $offset)" : "";
+        
+        string timeFilter = "";
+        if (days == -1) // TODAY
+        {
+            // For "Today", we might want to group by hour or just show one point.
+            // Let's stick to one point for now, or just filter for today.
+            timeFilter = "AND date(created_at_utc, 'localtime') = date('now', 'localtime')";
+        }
+        else if (days > 0)
+        {
+            timeFilter = $"AND created_at_utc >= datetime('now', '-{days} days')";
+        }
+
         cmd.CommandText = $"""
             SELECT date(created_at_utc, 'localtime') as d, 
                    COUNT(1), 
                    SUM(CASE WHEN outcome = 'pass' THEN 1 ELSE 0 END),
                    SUM(pp),
                    SUM(duration_ms),
-                   SUM(accuracy)
+                   SUM(accuracy),
+                   AVG(ur),
+                   AVG(key_ratio)
             FROM plays 
-            {timeFilter}
+            WHERE score > 0 {timeFilter}
             GROUP BY d
             ORDER BY d ASC
         """;
-        if (days > 0) cmd.Parameters.AddWithValue("$offset", $"-{days} days");
+        
         var list = new List<DailyStats>();
         using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -346,24 +514,51 @@ public class TrackerDb
                 PassCount = reader.GetInt32(2),
                 TotalPP = reader.IsDBNull(3) ? 0 : reader.GetDouble(3),
                 TotalDurationMs = reader.IsDBNull(4) ? 0 : reader.GetInt64(4),
-                TotalAccuracy = reader.IsDBNull(5) ? 0 : reader.GetDouble(5)
+                TotalAccuracy = reader.IsDBNull(5) ? 0 : reader.GetDouble(5),
+                AvgUR = reader.IsDBNull(6) ? 0 : reader.GetDouble(6),
+                AvgKeyRatio = reader.IsDBNull(7) ? 0 : reader.GetDouble(7)
             });
         }
         return list;
     }
 
 
+    public async Task<Dictionary<string, int>> GetMonthPlayCountsAsync(int year, int month)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        string monthStr = $"{year}-{month:D2}-%";
+        cmd.CommandText = "SELECT date(created_at_utc, 'localtime') as d, COUNT(*) FROM plays WHERE score > 0 AND date(created_at_utc, 'localtime') LIKE $m GROUP BY d";
+        cmd.Parameters.AddWithValue("$m", monthStr);
+        var dict = new Dictionary<string, int>();
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) dict[reader.GetString(0)] = reader.GetInt32(1);
+        return dict;
+    }
+
     public async Task MigrateAsync()
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
+        
+        // 1. Delete invalid scores
+        cmd.CommandText = "DELETE FROM plays WHERE score <= 0;";
+        await cmd.ExecuteNonQueryAsync();
+
+        // 2. Clear old indexes
         cmd.CommandText = "DROP INDEX IF EXISTS idx_plays_created_map;";
         await cmd.ExecuteNonQueryAsync();
-
-        cmd.CommandText = "DELETE FROM plays WHERE id NOT IN (SELECT MIN(id) FROM plays GROUP BY created_at_utc, beatmap_hash);";
+        cmd.CommandText = "DROP INDEX IF EXISTS idx_plays_created_hash_score;";
+        await cmd.ExecuteNonQueryAsync();
+        cmd.CommandText = "DROP INDEX IF EXISTS idx_plays_created_hash;";
         await cmd.ExecuteNonQueryAsync();
 
-        cmd.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS idx_plays_created_hash ON plays(created_at_utc, beatmap_hash);";
+        // 3. Delete duplicates (Keep only one per timestamp/map/score)
+        cmd.CommandText = "DELETE FROM plays WHERE id NOT IN (SELECT MIN(id) FROM plays GROUP BY created_at_utc, beatmap_hash, score);";
+        await cmd.ExecuteNonQueryAsync();
+
+        // 4. Create strict unique index
+        cmd.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS idx_plays_dedup ON plays(created_at_utc, beatmap_hash, score);";
         await cmd.ExecuteNonQueryAsync();
 
         cmd.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS idx_plays_score_id_nonzero ON plays(score_id) WHERE score_id != 0;";
@@ -463,8 +658,8 @@ public class TrackerDb
         cmd.Transaction = transaction;
 
         cmd.CommandText = """
-        INSERT OR IGNORE INTO plays (score_id, created_at_utc, outcome, duration_ms, beatmap, beatmap_hash, mods, stars, accuracy, score, combo, count300, count100, count50, misses, pp, rank, hit_offsets, timeline, aim_offsets, cursor_offsets, ur, replay_file, replay_hash)
-        VALUES ($score_id, $created_at_utc, $outcome, $duration_ms, $beatmap, $beatmap_hash, $mods, $stars, $accuracy, $score, $combo, $count300, $count100, $count50, $misses, $pp, $rank, $hit_offsets, $timeline, $aim_offsets, $cursor_offsets, $ur, $replay_file, $replay_hash);
+        INSERT OR IGNORE INTO plays (score_id, created_at_utc, outcome, duration_ms, beatmap, beatmap_hash, mods, stars, accuracy, score, combo, count300, count100, count50, misses, pp, rank, hit_offsets, timeline, aim_offsets, cursor_offsets, ur, replay_file, replay_hash, hit_errors, key_ratio)
+        VALUES ($score_id, $created_at_utc, $outcome, $duration_ms, $beatmap, $beatmap_hash, $mods, $stars, $accuracy, $score, $combo, $count300, $count100, $count50, $misses, $pp, $rank, $hit_offsets, $timeline, $aim_offsets, $cursor_offsets, $ur, $replay_file, $replay_hash, $hit_errors, $key_ratio);
         """;
 
 
@@ -492,6 +687,8 @@ public class TrackerDb
         var pUR = cmd.Parameters.Add("$ur", SqliteType.Real);
         var pReplay = cmd.Parameters.Add("$replay_file", SqliteType.Text);
         var pReplayHash = cmd.Parameters.Add("$replay_hash", SqliteType.Text);
+        var pHitErrors = cmd.Parameters.Add("$hit_errors", SqliteType.Text);
+        var pKeyRatio = cmd.Parameters.Add("$key_ratio", SqliteType.Real);
 
         foreach (var row in plays)
         {
@@ -519,6 +716,8 @@ public class TrackerDb
             pUR.Value = row.UR;
             pReplay.Value = row.ReplayFile ?? "";
             pReplayHash.Value = row.ReplayHash ?? "";
+            pHitErrors.Value = row.HitErrorsJson ?? (object)DBNull.Value;
+            pKeyRatio.Value = row.KeyRatio;
 
             await cmd.ExecuteNonQueryAsync();
         }
@@ -539,7 +738,7 @@ public class TrackerDb
 
     private const string PlaysSelectQuery = """
         SELECT p.id, p.score_id, p.created_at_utc, p.outcome, p.duration_ms, p.beatmap, p.mods, p.stars, p.accuracy, p.score, p.combo, p.count300, p.count100, p.count50, p.misses, p.pp, p.notes, p.beatmap_hash, p.rank, p.hit_offsets, p.timeline, p.pp_timeline, p.aim_offsets, b.background_hash, p.ur, p.replay_file, p.replay_hash,
-               b.title, b.artist, b.version, b.cs, b.ar, b.od, b.hp, b.bpm, p.cursor_offsets, p.map_path
+               b.title, b.artist, b.version, b.cs, b.ar, b.od, b.hp, b.bpm, p.cursor_offsets, p.map_path, p.hit_errors, p.key_ratio
         FROM plays p
         LEFT JOIN beatmaps b ON p.beatmap_hash = b.hash
         """;
@@ -587,7 +786,9 @@ public class TrackerDb
             HP = reader.IsDBNull(33) ? null : reader.GetDouble(33),
             BPM = reader.IsDBNull(34) ? null : reader.GetDouble(34),
             CursorOffsetsJson = reader.IsDBNull(35) ? "" : reader.GetString(35),
-            MapPath = reader.IsDBNull(36) ? "" : reader.GetString(36)
+            MapPath = reader.IsDBNull(36) ? "" : reader.GetString(36),
+            HitErrorsJson = reader.IsDBNull(37) ? null : reader.GetString(37),
+            KeyRatio = reader.IsDBNull(38) ? 0 : reader.GetDouble(38)
         };
     }
 
@@ -701,7 +902,7 @@ public class TrackerDb
 
     public record TotalStats(int totalPlays, long totalTimeMs);
     public record DailyAverageStats(double avgDailyAcc, double avgDailyPP);
-    public record AnalyticsSummary(int TotalPlays, long TotalDurationMs, double AvgPP, double AvgAccuracy);
+    public record AnalyticsSummary(int TotalPlays, long TotalDurationMs, double AvgPP, double AvgAccuracy, double AvgUR, double AvgKeyRatio);
     
     public class DailyStats
     {
@@ -711,6 +912,8 @@ public class TrackerDb
         public double TotalPP { get; set; }
         public double TotalAccuracy { get; set; }
         public long TotalDurationMs { get; set; }
+        public double AvgUR { get; set; }
+        public double AvgKeyRatio { get; set; }
         public double AvgPP => PlayCount > 0 ? TotalPP / PlayCount : 0;
         public double AvgAcc => PlayCount > 0 ? TotalAccuracy / PlayCount : 0;
     }

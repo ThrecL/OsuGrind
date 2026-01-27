@@ -4,6 +4,7 @@ using System.Linq;
 using System.Collections.Generic;
 using OsuGrind.Models;
 using OsuGrind.Services;
+using OsuGrind.Api;
 
 namespace OsuGrind.LiveReading;
 
@@ -11,14 +12,15 @@ public class StableScoreDetector
 {
     private readonly TrackerDb _db;
     private readonly SoundPlayer _soundPlayer;
+    private readonly ApiServer _api;
     private bool _hasRecordedCurrentPlay;
     private int _lastState;
     private double _lastTime;
     private bool _wasPlaying;
     
     private List<object[]> _liveTimeline = new();
-    private List<object[]> _ppTimeline = new(); // Format: [pp, maxC, acc, c300, c100, c50, miss, timeMs, currentCombo, eventType]
-    private List<int> _pendingHitIndices = new(); // Indices in _ppTimeline waiting for a hit result (slider heads/ticks)
+    private List<object[]> _ppTimeline = new(); 
+    private List<int> _pendingHitIndices = new(); 
     private int _lastCombo;
     private int _lastMisses;
     private int _lastH300, _lastH100, _lastH50;
@@ -28,14 +30,14 @@ public class StableScoreDetector
 
     private long _lastSeenResultScore = -1;
     private int _consecutiveResultScoreCount = 0;
-    private long _lastGameplayScore = 0;
 
     public LiveSnapshot? LastSnapshot { get; private set; }
 
-    public StableScoreDetector(TrackerDb db, SoundPlayer soundPlayer)
+    public StableScoreDetector(TrackerDb db, SoundPlayer soundPlayer, ApiServer api)
     {
         _db = db;
         _soundPlayer = soundPlayer;
+        _api = api;
     }
 
     public event Action<bool>? OnPlayRecorded;
@@ -54,7 +56,12 @@ public class StableScoreDetector
             bool isResults = snapshot.StateNumber == 7;
             bool isMenu = snapshot.StateNumber == 0 || snapshot.StateNumber == 1 || snapshot.StateNumber == 4 || snapshot.StateNumber == 5 || snapshot.StateNumber == 11;
 
-            if (!isResults) _waitingForResults = false;
+            if (!isResults) 
+            {
+                _waitingForResults = false;
+                _lastSeenResultScore = -1;
+                _consecutiveResultScoreCount = 0;
+            }
 
             // Correct replay to live if memory now says LIVE
             if (isPlaying && _isReplaySession && !snapshot.IsReplay)
@@ -83,7 +90,6 @@ public class StableScoreDetector
                     _lastMisses = 0;
                     _lastH300 = 0; _lastH100 = 0; _lastH50 = 0;
                     _lastTime = 0;
-                    _lastGameplayScore = 0;
                     _pendingPassSnapshot = null;
                     
                     // Add an initial clean 0-stats frame
@@ -101,7 +107,7 @@ public class StableScoreDetector
                     // Record pending pass when leaving results screen
                     if (_pendingPassSnapshot != null)
                     {
-                        DebugService.Log($"[StableDetector] Left Results Screen. Recording Pass now.", "Detector");
+                        DebugService.Log($"[StableDetector] Left Results Screen. Recording Pass now. Score={_pendingPassSnapshot.Score}", "Detector");
                         RecordPlay(_pendingPassSnapshot, true);
                         _pendingPassSnapshot = null;
                     }
@@ -125,7 +131,7 @@ public class StableScoreDetector
                 long currentResultsScore = snapshot.Score ?? 0;
                 
                 // DATA STABILIZATION (Wait for memory to stop flickering)
-                if (currentResultsScore == _lastSeenResultScore && currentResultsScore > 0)
+                if (currentResultsScore > 0 && currentResultsScore == _lastSeenResultScore)
                 {
                     _consecutiveResultScoreCount++;
                 }
@@ -133,24 +139,17 @@ public class StableScoreDetector
                 {
                     _lastSeenResultScore = currentResultsScore;
                     _consecutiveResultScoreCount = 1;
-                    return; 
                 }
 
-                if (_consecutiveResultScoreCount >= 3)
+                // If score is stable for 5 frames, capture it
+                if (_consecutiveResultScoreCount >= 5 && _pendingPassSnapshot == null)
                 {
                     if (ValidateSnapshot(snapshot))
                     {
-                        DebugService.Log($"[StableDetector] Results Data Captured and Stabilized. Score={snapshot.Score}", "Detector");
+                        DebugService.Log($"[StableDetector] Results Data Captured and Stabilized. Score={snapshot.Score}, Combo={snapshot.MaxCombo}, Acc={snapshot.Accuracy:P2}", "Detector");
                         _pendingPassSnapshot = snapshot.Clone(); 
                         _waitingForResults = false;
-                        _wasPlaying = false;
-                        _lastSeenResultScore = -1;
-                        _consecutiveResultScoreCount = 0;
-                    }
-                    else
-                    {
-                        DebugService.Log($"[StableDetector] Results Data failed validation. Score={snapshot.Score}, Acc={snapshot.Accuracy}", "Detector");
-                        _consecutiveResultScoreCount = 0; // Reset and try again
+                        // Keep _wasPlaying true until we actually record it or leave menu
                     }
                 }
             }
@@ -158,7 +157,6 @@ public class StableScoreDetector
             // FAIL / RETRY DETECTION
             if (isPlaying && _wasPlaying && LastSnapshot != null)
             {
-                _lastGameplayScore = snapshot.Score ?? 0;
                 int passedObjects = (snapshot.HitCounts?.Count300 ?? 0) + (snapshot.HitCounts?.Count100 ?? 0) + (snapshot.HitCounts?.Count50 ?? 0) + (snapshot.HitCounts?.Misses ?? 0);
 
                 // Record fail if HP = 0
@@ -183,7 +181,6 @@ public class StableScoreDetector
                         _liveTimeline.Clear();
                         _ppTimeline.Clear();
                         _lastCombo = 0; _lastMisses = 0; _lastH300 = 0; _lastH100 = 0; _lastH50 = 0;
-                        _lastGameplayScore = 0;
                         _ppTimeline.Add(new object[] { 0.0, 0, 1.0, 0, 0, 0, 0, 0, 0, 0 });
                     }
                 }
@@ -198,71 +195,22 @@ public class StableScoreDetector
                 int h100 = snapshot.HitCounts?.Count100 ?? 0;
                 int h50 = snapshot.HitCounts?.Count50 ?? 0;
 
-                // Capture every state change (Head hit, Tick hit, End hit, Miss, Circle hit)
                 bool hChanged = h300 != _lastH300 || h100 != _lastH100 || h50 != _lastH50;
                 bool comboChanged = combo != _lastCombo;
                 bool missesChanged = misses != _lastMisses;
 
-                // FIX: Detect missed Slider Heads (Combo increased but Hits didn't)
-                // If we missed a frame where a slider head was hit, we might see Combo+2 and Hits+1 (Head + End).
-                // We need to inject the intermediate "Head" event.
-                if (comboChanged && !missesChanged && combo > _lastCombo)
-                {
-                    int currentTotalHits = h300 + h100 + h50;
-                    int lastTotalHits = _lastH300 + _lastH100 + _lastH50;
-                    int deltaCombo = combo - _lastCombo;
-                    int deltaHits = currentTotalHits - lastTotalHits;
-
-                    if (deltaHits >= 0)
-                    {
-                        int nonHitSteps = deltaCombo - deltaHits;
-                        int eventsToInject = nonHitSteps;
-                        // If no hits occurred this frame, the final event IS the non-hit event, so don't duplicate it.
-                        if (deltaHits == 0) eventsToInject--;
-
-                        if (eventsToInject > 0)
-                        {
-                            DebugService.Log($"[StableDetector] Injecting {eventsToInject} intermediate slider events. dCombo={deltaCombo}, dHits={deltaHits}", "Detector");
-                            for (int i = 0; i < eventsToInject; i++)
-                            {
-                                int intermediateCombo = _lastCombo + 1 + i;
-                                int injectedIdx = _ppTimeline.Count;
-                                var stats = new object[] { 
-                                    snapshot.PP ?? 0, snapshot.MaxCombo ?? 0, snapshot.Accuracy ?? 0, 
-                                    _lastH300, _lastH100, _lastH50, _lastMisses,
-                                    snapshot.TimeMs ?? 0, intermediateCombo, 0 
-                                };
-                                _ppTimeline.Add(stats);
-                                _pendingHitIndices.Add(injectedIdx);
-                                _liveTimeline.Add(new object[] { snapshot.TimeMs ?? 0, intermediateCombo, 0 });
-                            }
-                        }
-                    }
-                }
-                
-                // Record whenever stats change. This is the only way to catch slider heads.
                 if (hChanged || comboChanged || missesChanged || _ppTimeline.Count == 0)
                 {
                     int eventType = missesChanged ? 1 : (combo < _lastCombo && !missesChanged ? 2 : 0);
                     
-                    // HIT SHIFTING LOGIC
-                    // 1. Determine if this current event should be shifted later (Head, Tick, Repeat)
-                    bool isPending = comboChanged && !hChanged && !missesChanged && combo > _lastCombo;
-                    
-                    // 2. If hits increased (or we missed), and we have pending slider parts, 
-                    // shift the hit back to ALL pending indices for this object.
                     if ((hChanged || missesChanged) && _pendingHitIndices.Count > 0)
                     {
                         foreach (int idx in _pendingHitIndices)
                         {
                             var entry = _ppTimeline[idx];
-                            // Shift judgment results (Hits, PP, Acc) back to the head/ticks
                             entry[0] = snapshot.PP ?? (double)entry[0];
                             entry[2] = snapshot.Accuracy ?? (double)entry[2];
-                            entry[3] = h300;
-                            entry[4] = h100;
-                            entry[5] = h50;
-                            entry[6] = misses;
+                            entry[3] = h300; entry[4] = h100; entry[5] = h50; entry[6] = misses;
                         }
                         _pendingHitIndices.Clear();
                     }
@@ -270,21 +218,12 @@ public class StableScoreDetector
                     _lastH300 = h300; _lastH100 = h100; _lastH50 = h50;
 
                     var stats = new object[] { 
-                        snapshot.PP ?? 0,           // 0: PP
-                        snapshot.MaxCombo ?? 0,     // 1: Max Combo
-                        snapshot.Accuracy ?? 0,     // 2: Accuracy
-                        h300,                       // 3: 300s
-                        h100,                       // 4: 100s
-                        h50,                        // 5: 50s
-                        misses,                     // 6: Misses
-                        snapshot.TimeMs ?? 0,       // 7: TimeMs
-                        combo,                      // 8: CURRENT COMBO
-                        eventType                   // 9: EventType
+                        snapshot.PP ?? 0, snapshot.MaxCombo ?? 0, snapshot.Accuracy ?? 0,
+                        h300, h100, h50, misses, snapshot.TimeMs ?? 0, combo, eventType
                     };
 
                     int statsIdx = _ppTimeline.Count;
                     _ppTimeline.Add(stats);
-                    if (isPending) _pendingHitIndices.Add(statsIdx);
                     
                     if (comboChanged || missesChanged)
                     {
@@ -308,50 +247,26 @@ public class StableScoreDetector
     {
         if (s == null) return false;
         if (string.IsNullOrEmpty(s.MD5Hash)) return false;
-        
-        // Basic sanity checks
-        if (s.Score < 0 || s.Score > 4000000000) return false; // Max possible score is usually < 2.1B, but 4B is safe garbage threshold
+        if (s.Score < 0 || s.Score > 4000000000) return false; 
         if (s.Accuracy < 0 || s.Accuracy > 1.0001) return false;
-        if (s.Combo < 0 || s.Combo > 20000) return false; // No map has > 20k combo
-        if (s.MaxCombo < 0 || s.MaxCombo > 20000) return false;
-        
-        // PP sanity check
-        if (s.PP.HasValue && (!double.IsFinite(s.PP.Value) || s.PP.Value < 0 || s.PP.Value > 100000)) return false;
-
-        // If it's a results screen, we expect some hits
         if (s.StateNumber == 7)
         {
             int totalHits = (s.HitCounts?.Count300 ?? 0) + (s.HitCounts?.Count100 ?? 0) + (s.HitCounts?.Count50 ?? 0) + (s.HitCounts?.Misses ?? 0);
             if (totalHits == 0) return false;
-            
-            // Score vs Hits sanity check
-            if (s.Score > 0 && totalHits > 0)
-            {
-                double scorePerHit = (double)s.Score / totalHits;
-                if (scorePerHit > 2000000) return false; // Impossible score per hit
-            }
         }
-
         return true;
     }
 
     private void RecordPlay(LiveSnapshot s, bool isPass)
     {
         if (_hasRecordedCurrentPlay) return;
-        
-        if (s.IsPreview) return;
+        if (s.IsPreview || s.IsReplay) return;
         _hasRecordedCurrentPlay = true;
 
-        if (s.IsReplay) return;
-
-        if (string.IsNullOrEmpty(s.MD5Hash))
-        {
-            DebugService.Log("[StableDetector] Skip: Missing MD5", "Detector");
-            return;
-        }
+        if (string.IsNullOrEmpty(s.MD5Hash)) return;
 
         string outcome = isPass ? "pass" : "fail";
-        DebugService.Log($"[StableDetector] Recording {outcome} for {s.Beatmap}. Score={s.Score}, Acc={s.Accuracy:P2}, Combo={s.MaxCombo}, Hits={s.HitCounts?.Count300}/{s.HitCounts?.Count100}/{s.HitCounts?.Count50}/{s.HitCounts?.Misses}", "Detector");
+        DebugService.Log($"[StableDetector] Saving {outcome} to DB. Score={s.Score}, Acc={s.Accuracy:P2}", "Detector");
         var play = CreateCompletedPlay(s, outcome);
         SaveToDb(play, isPass);
     }
@@ -388,6 +303,8 @@ public class StableScoreDetector
             PP = s.PP ?? 0,
             UR = s.LiveUR,
             HitOffsets = string.Join(",", s.LiveHitOffsets),
+            HitErrorsJson = s.HitErrorsJson,
+            KeyRatio = s.KeyRatio,
             TimelineJson = SerializeTimeline(),
             PpTimelineJson = SerializePpTimeline(),
             AimOffsetsJson = s.AimOffsetsJson,
@@ -412,7 +329,7 @@ public class StableScoreDetector
         {
             var replayDir = Path.Combine(osuFolder, "Data", "r");
             if (!Directory.Exists(replayDir)) return "";
-            for (int attempt = 1; attempt <= 5; attempt++)
+            for (int attempt = 1; attempt <= 10; attempt++)
             {
                 var files = new DirectoryInfo(replayDir).GetFiles("*.osr");
                 var filtered = files
@@ -434,6 +351,17 @@ public class StableScoreDetector
     private void SaveToDb(CompletedPlay play, bool isPass)
     {
         var row = PlayRow.FromCompleted(play);
+        
+        if (isPass && !string.IsNullOrEmpty(play.ReplayFile) && File.Exists(play.MapPath))
+        {
+            try {
+                var analysis = MissAnalysisService.Analyze(play.MapPath, play.ReplayFile);
+                row.UR = analysis.UR;
+                row.HitErrorsJson = System.Text.Json.JsonSerializer.Serialize(analysis.HitErrors);
+                row.KeyRatio = analysis.KeyRatio;
+            } catch { }
+        }
+
         System.Threading.Tasks.Task.Run(async () =>
         {
             try
@@ -463,7 +391,7 @@ public class StableScoreDetector
                     await _db.InsertOrUpdateBeatmapAsync(beatmapRow);
                 }
                 await _db.InsertPlayAsync(row);
-                DebugService.Log($"[StableDetector] Recorded {play.Outcome}.", "Detector");
+                await _api.BroadcastRefresh();
             }
             catch (Exception ex) { DebugService.Error($"[StableDetector] DB Error: {ex.Message}", "Detector"); }
         });

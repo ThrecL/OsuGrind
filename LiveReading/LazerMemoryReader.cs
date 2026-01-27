@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using OsuGrind.Models;
 using OsuGrind.Services;
+using OsuGrind.Api;
 
 namespace OsuGrind.LiveReading
 {
@@ -112,10 +113,10 @@ namespace OsuGrind.LiveReading
         }
 
         // Constructor
-        public LazerMemoryReader(TrackerDb db, SoundPlayer soundPlayer)
+        public LazerMemoryReader(TrackerDb db, SoundPlayer soundPlayer, ApiServer api)
         {
             _rosuService = new RosuService();
-            _detector = new LazerScoreDetector(db, soundPlayer);
+            _detector = new LazerScoreDetector(db, soundPlayer, api);
             DebugLog("LazerMemoryReader constructor CALLED.");
         }
 
@@ -1328,6 +1329,7 @@ namespace OsuGrind.LiveReading
                                  {
                                      snapshot.PPIfFC = _cachedStats.PPIfFC;
                                      snapshot.MaxCombo = _cachedStats.MaxCombo;
+                                     snapshot.MapMaxCombo = _cachedStats.MaxCombo;
                                      snapshot.Combo = _cachedStats.MaxCombo; // Show max combo in song select
                                      snapshot.Score = _cachedStats.MaxScore;
                                      snapshot.Stars = _cachedStats.Stars;
@@ -1344,6 +1346,7 @@ namespace OsuGrind.LiveReading
                                      {
                                          snapshot.TotalTimeMs = (int)(_cachedStats.MapLength / clockRate);
                                          snapshot.TimeMs = snapshot.TotalTimeMs; // Show full length in Song Select
+                                         snapshot.Progress = 1.0;
                                      }
                                 }
                             }
@@ -1809,6 +1812,12 @@ namespace OsuGrind.LiveReading
                         }
                         snapshot.IsPaused = _isPausedState;
                         snapshot.TimeMs = (int)currentTime;
+                        
+                        if (_cachedStats != null && _cachedStats.MapLength > 0)
+                        {
+                            double totalTime = _cachedStats.MapLength / clockRate;
+                            if (totalTime > 0) snapshot.Progress = Math.Clamp(currentTime / totalTime, 0, 1);
+                        }
                     }
                 }
 

@@ -85,4 +85,19 @@ public class AuthService
         }
         return null;
     }
+
+    public async Task<JsonElement?> GetUserTopScoresAsync(string token, int userId, int limit = 100)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Get, $"https://osu.ppy.sh/api/v2/users/{userId}/scores/best?limit={limit}");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        
+        var response = await _http.SendAsync(req);
+        if (response.IsSuccessStatusCode)
+        {
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.Clone();
+        }
+        return null;
+    }
 }

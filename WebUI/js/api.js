@@ -43,8 +43,9 @@ class OsuGrindAPI {
                     }
                     this.liveCallbacks.forEach(cb => cb(data));
                 } else if (payload.type === 'log') {
-
-                    this.logCallbacks.forEach(cb => cb(payload.message, payload.level));
+                    this.liveCallbacks.forEach(cb => cb({ type: 'log', message: payload.message, level: payload.level }));
+                } else if (payload.type === 'refresh') {
+                    this.liveCallbacks.forEach(cb => cb({ type: 'refresh' }));
                 } else {
                     // Backwards compatibility for old raw data if any
                     this.liveCallbacks.forEach(cb => cb(payload));
@@ -162,6 +163,10 @@ class OsuGrindAPI {
     // Profile
     async getProfile() {
         return this.fetch('/api/profile');
+    }
+
+    async getTopPlays() {
+        return this.fetch('/api/profile/top');
     }
 
     // Settings

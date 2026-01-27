@@ -32,6 +32,12 @@ class HistoryModule {
         document.getElementById('backToCalendar')?.addEventListener('click', () => this.showCalendar());
     }
 
+    resetToCalendar() {
+        console.log('[History] Resetting to calendar view');
+        this.showCalendar();
+        this.refresh();
+    }
+
     async refresh() {
         await this.loadMonthData();
         this.renderCalendar();
@@ -118,8 +124,20 @@ class HistoryModule {
     async showDayDetail(dateStr) {
         this.selectedDate = dateStr;
 
-        document.getElementById('calendarView').style.display = 'none';
-        document.getElementById('dayView').style.display = 'block';
+        const calendarView = document.getElementById('calendarView');
+        const dayView = document.getElementById('dayView');
+
+        // Animate out calendar
+        calendarView.classList.add('exiting');
+        
+        setTimeout(() => {
+            calendarView.style.display = 'none';
+            calendarView.classList.remove('exiting');
+            dayView.style.display = 'block';
+            dayView.classList.add('entering');
+            
+            setTimeout(() => dayView.classList.remove('entering'), 350);
+        }, 300);
 
         const date = new Date(dateStr);
         document.getElementById('dayTitle').textContent = date.toLocaleDateString('en-US', {
@@ -139,8 +157,21 @@ class HistoryModule {
     }
 
     showCalendar() {
-        document.getElementById('calendarView').style.display = 'block';
-        document.getElementById('dayView').style.display = 'none';
+        const calendarView = document.getElementById('calendarView');
+        const dayView = document.getElementById('dayView');
+        
+        // Animate out day view
+        dayView.classList.add('exiting');
+        
+        setTimeout(() => {
+            dayView.style.display = 'none';
+            dayView.classList.remove('exiting');
+            calendarView.style.display = 'block';
+            calendarView.classList.add('entering');
+            
+            setTimeout(() => calendarView.classList.remove('entering'), 350);
+        }, 300);
+        
         this.selectedDate = null;
     }
 

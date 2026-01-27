@@ -25,6 +25,12 @@ public class SettingsManager
         public string? AccessToken { get; set; }
         public string? Username { get; set; }
         public double PeakPP { get; set; }
+
+        // Daily Goals
+        public int GoalPlays { get; set; } = 20;
+        public int GoalHits { get; set; } = 5000;
+        public double GoalStars { get; set; } = 5.0;
+        public int GoalPP { get; set; } = 100;
     }
 
 
@@ -95,6 +101,11 @@ public class SettingsManager
         if (dict.TryGetValue("accessToken", out var at)) _current.AccessToken = at?.ToString();
         if (dict.TryGetValue("username", out var un)) _current.Username = un?.ToString();
         
+        if (dict.TryGetValue("goalPlays", out var gp)) _current.GoalPlays = TryGetInt(gp);
+        if (dict.TryGetValue("goalHits", out var gh)) _current.GoalHits = TryGetInt(gh);
+        if (dict.TryGetValue("goalStars", out var gs)) _current.GoalStars = TryGetDouble(gs);
+        if (dict.TryGetValue("goalPP", out var gpp)) _current.GoalPP = TryGetInt(gpp);
+
         Save();
     }
 
@@ -105,5 +116,24 @@ public class SettingsManager
         if (val is bool b) return b;
         if (val is JsonElement je) return je.ValueKind == JsonValueKind.True;
         return val.ToString()?.ToLower() == "true";
+    }
+
+    private static int TryGetInt(object? val)
+    {
+        if (val == null) return 0;
+        if (val is int i) return i;
+        if (val is JsonElement je) return je.TryGetInt32(out int result) ? result : 0;
+        int.TryParse(val.ToString(), out int r);
+        return r;
+    }
+
+    private static double TryGetDouble(object? val)
+    {
+        if (val == null) return 0;
+        if (val is double d) return d;
+        if (val is float f) return f;
+        if (val is JsonElement je) return je.TryGetDouble(out double result) ? result : 0;
+        double.TryParse(val.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double r);
+        return r;
     }
 }
