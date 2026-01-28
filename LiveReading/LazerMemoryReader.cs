@@ -2286,18 +2286,24 @@ namespace OsuGrind.LiveReading
 
         private string GetLazerFilesPath()
         {
+            // 1. User Settings override
             string? customPath = SettingsManager.Current.LazerPath;
             if (!string.IsNullOrEmpty(customPath) && Directory.Exists(Path.Combine(customPath, "files")))
             {
                 return Path.Combine(customPath, "files");
             }
 
+            // 2. Primary: LocalAppData/osu (The standard path for modern Lazer)
+            string localOsu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu");
+            if (Directory.Exists(Path.Combine(localOsu, "files")))
+            {
+                return Path.Combine(localOsu, "files");
+            }
+
+            // 3. Fallback: Check storage.ini for custom migration paths
             string roamingPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu");
-            string localPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu");
-            
-            // Check storage.ini for custom path
             string storageIni = Path.Combine(roamingPath, "storage.ini");
-            if (!File.Exists(storageIni)) storageIni = Path.Combine(localPath, "storage.ini");
+            if (!File.Exists(storageIni)) storageIni = Path.Combine(localOsu, "storage.ini");
 
             if (File.Exists(storageIni))
             {
@@ -2312,12 +2318,11 @@ namespace OsuGrind.LiveReading
                 } catch { }
             }
 
-            // Fallbacks
+            // 4. Final Fallbacks
             if (Directory.Exists(Path.Combine(roamingPath, "files"))) return Path.Combine(roamingPath, "files");
-            if (Directory.Exists(Path.Combine(localPath, "files"))) return Path.Combine(localPath, "files");
             if (Directory.Exists(@"G:\osu-lazer-data\files")) return @"G:\osu-lazer-data\files";
 
-            return Path.Combine(roamingPath, "files"); // Final fallback
+            return Path.Combine(localOsu, "files"); // Default to Local if all else fails
         }
 
         private void UpdateBeatmapFile(IntPtr beatmapInfoPtr)
@@ -3077,8 +3082,8 @@ namespace OsuGrind.LiveReading
                     if (string.Equals(fileHash, targetFileHash, StringComparison.OrdinalIgnoreCase))
                     {
                         // Found the exact file! Build the path.
-                        string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                        string path = Path.Combine(appData, "osu", "files", fileHash.Substring(0, 1), fileHash.Substring(0, 2), fileHash);
+                        string filesPath = GetLazerFilesPath();
+                        string path = Path.Combine(filesPath, fileHash.Substring(0, 1), fileHash.Substring(0, 2), fileHash);
                         WriteLog($"ResolveOsuFileByHash: Matched file hash -> {path}");
                         return path;
                     }
@@ -3105,15 +3110,16 @@ namespace OsuGrind.LiveReading
 
             try 
             {
-                var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string localFiles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu", "files");
+                string roamingFiles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu", "files");
                 
                 var candidates = new[]
                 {
-                    Path.Combine(appData, "osu", "files"),
-                    Path.Combine(localAppData, "osu", "files"),
-                    Path.Combine(localAppData, "osu!", "files"),
-                    Path.Combine(appData, "osu!", "files")
+                    localFiles,
+                    roamingFiles,
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu!", "files"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu!", "files"),
+                    @"G:\osu-lazer-data\files"
                 };
 
                 foreach(var root in candidates)
@@ -3129,5 +3135,6 @@ namespace OsuGrind.LiveReading
 
             return null;
         }
+
     }
 }

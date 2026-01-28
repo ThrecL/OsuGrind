@@ -44,11 +44,17 @@ namespace OsuGrind.Services
             string roamingPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu");
             string localPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu");
             
-            string? storagePath = roamingPath;
+            // 1. Primary: LocalAppData/osu (The standard path for modern Lazer)
+            string? storagePath = localPath;
+            if (!Directory.Exists(localPath) || !File.Exists(Path.Combine(localPath, "client.realm")))
+            {
+                storagePath = roamingPath;
+            }
 
-            // 1. Check Roaming storage.ini
+            // 2. Fallback: Check storage.ini for custom migration paths
             string storageIni = Path.Combine(roamingPath, "storage.ini");
             if (!File.Exists(storageIni)) storageIni = Path.Combine(localPath, "storage.ini");
+
 
             // Check G: drive fallback found by search
             string gDrivePath = @"G:\osu-lazer-data";
@@ -497,11 +503,12 @@ namespace OsuGrind.Services
         {
             string filesRoot = Path.Combine(_lazerAppDataPath, "files");
             
-            // Also check for 'exports' folder
-            string exportsRoot = Path.Combine(_lazerAppDataPath, "exports");
-            string gExports = @"G:\osu-lazer-data\exports";
-            string cExports = @"C:\Users\3clex\AppData\Roaming\osu\exports";
+            // Also check for 'exports' folder and other standard locations
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string roamingAppData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
+            string exportsRoot = Path.Combine(_lazerAppDataPath, "exports");
+            
             Log("Scanning files directory for recent replays (Fallback)...");
             return await Task.Run(() =>
             {
@@ -515,8 +522,19 @@ namespace OsuGrind.Services
                     
                     if (Directory.Exists(filesRoot)) candidatePaths.Add(filesRoot);
                     if (Directory.Exists(exportsRoot)) candidatePaths.Add(exportsRoot);
+                    
+                    // Add standard candidates if they differ from current _lazerAppDataPath
+                    string localFiles = Path.Combine(localAppData, "osu", "files");
+                    if (Directory.Exists(localFiles) && localFiles != filesRoot) candidatePaths.Add(localFiles);
+                    
+                    string roamingFiles = Path.Combine(roamingAppData, "osu", "files");
+                    if (Directory.Exists(roamingFiles) && roamingFiles != filesRoot) candidatePaths.Add(roamingFiles);
+
+                    string gExports = @"G:\osu-lazer-data\exports";
                     if (Directory.Exists(gExports)) candidatePaths.Add(gExports);
-                    if (Directory.Exists(cExports)) candidatePaths.Add(cExports);
+                    string gFiles = @"G:\osu-lazer-data\files";
+                    if (Directory.Exists(gFiles)) candidatePaths.Add(gFiles);
+
 
                     foreach (var root in candidatePaths)
                     {

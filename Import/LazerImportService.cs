@@ -478,17 +478,20 @@ public class LazerImportService
                 if (File.Exists(p)) return p;
             } catch {}
         }
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        
         var candidates = new[] {
-            Path.Combine(appData, "osu", "client.realm"),
             Path.Combine(localAppData, "osu", "client.realm"),
-            Path.Combine(appData, "osu!", "client.realm"),
-            Path.Combine(localAppData, "osu!", "client.realm")
+            Path.Combine(appData, "osu", "client.realm"),
+            Path.Combine(localAppData, "osu!", "client.realm"),
+            Path.Combine(appData, "osu!", "client.realm")
         };
         foreach (var p in candidates) if (File.Exists(p)) return p;
         return foldersPath ?? candidates[0];
     }
+
 
     private List<ExtractedScore> ExtractScoresDynamic(RealmConfiguration config, string? targetUsername)
     {
