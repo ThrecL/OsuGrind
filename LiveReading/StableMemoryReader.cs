@@ -307,8 +307,11 @@ namespace OsuGrind.LiveReading
                         snapshot.ModsList = _cachedStats.ModsList;
                         snapshot.Mods = _cachedStats.Mods;
                         snapshot.AR = _cachedStats.AR; snapshot.CS = _cachedStats.CS; snapshot.OD = _cachedStats.OD; snapshot.HP = _cachedStats.HP;
+                        snapshot.BaseAR = (float)_rosuService.AR; snapshot.BaseCS = (float)_rosuService.CS; snapshot.BaseOD = (float)_rosuService.OD; snapshot.BaseHP = (float)_rosuService.HP;
                         snapshot.Stars = _cachedStats.Stars; snapshot.PPIfFC = _cachedStats.PPIfFC;
+                        snapshot.BaseStars = _rosuService.GetStars(0, 0, 1.0);
                         snapshot.MostlyBPM = _cachedStats.MostlyBPM; snapshot.BPM = _cachedStats.BPM;
+                        snapshot.BaseBPM = (int)Math.Round(_rosuService.BaseBpm);
                         snapshot.MapMaxCombo = _cachedStats.MapMaxCombo; snapshot.MaxScore = _cachedStats.MaxScore;
                         snapshot.TotalObjects = _cachedStats.TotalObjects; snapshot.TotalTimeMs = _cachedStats.TotalTimeMs;
 
@@ -406,25 +409,19 @@ namespace OsuGrind.LiveReading
                         }
                     }
 
-                        if (snapshot.HitCounts != null && _rosuService != null && _rosuService.IsLoaded && snapshot.ModsList != null)
+                    if (snapshot.HitCounts != null && _rosuService != null && _rosuService.IsLoaded && snapshot.ModsList != null)
+                    {
+                        uint rosuMods = RosuService.ModsToRosuStats(snapshot.ModsList);
+                        double clockRate = RosuService.GetClockRateFromMods(rosuMods);
+                        int passed = snapshot.HitCounts.Count300 + snapshot.HitCounts.Count100 + snapshot.HitCounts.Count50 + snapshot.HitCounts.Misses;
+                        if (passed == 0) snapshot.PP = 0;
+                        else
                         {
-                            uint rosuMods = RosuService.ModsToRosuStats(snapshot.ModsList);
-                            double clockRate = RosuService.GetClockRateFromMods(rosuMods);
-                            int passed = snapshot.HitCounts.Count300 + snapshot.HitCounts.Count100 + snapshot.HitCounts.Count50 + snapshot.HitCounts.Misses;
-
-                            if (_cachedStats != null && _cachedStats.TotalTimeMs > 0)
-                            {
-                                snapshot.Progress = Math.Clamp((double)(snapshot.TimeMs ?? 0) / _cachedStats.TotalTimeMs, 0, 1);
-                            }
-
-                            if (passed == 0) snapshot.PP = 0;
-                            else
-                            {
-                                double ratio = _rosuService.TotalObjects > 0 ? (double)passed / _rosuService.TotalObjects : 0;
-                                int sliderEnds = (int)Math.Round(ratio * _rosuService.TotalSliders);
-                                snapshot.PP = _rosuService.CalculatePp(rosuMods, snapshot.MaxCombo ?? 0, snapshot.HitCounts.Count300, snapshot.HitCounts.Count100, snapshot.HitCounts.Count50, snapshot.HitCounts.Misses, passed, sliderEndHits: sliderEnds, clockRate: clockRate);
-                            }
+                            double ratio = _rosuService.TotalObjects > 0 ? (double)passed / _rosuService.TotalObjects : 0;
+                            int sliderEnds = (int)Math.Round(ratio * _rosuService.TotalSliders);
+                            snapshot.PP = _rosuService.CalculatePp(rosuMods, snapshot.MaxCombo ?? 0, snapshot.HitCounts.Count300, snapshot.HitCounts.Count100, snapshot.HitCounts.Count50, snapshot.HitCounts.Misses, passed, sliderEndHits: sliderEnds, clockRate: clockRate);
                         }
+                    }
                 }
                 _detector.Process(snapshot);
             }

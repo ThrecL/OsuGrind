@@ -166,6 +166,21 @@ class GoalsModule {
         this.updateFill('goalStarsFill', 'goalStarsPercent', this.progress.stars, 10, 'stars'); 
         this.updateFill('goalPPFill', 'goalPPPercent', this.progress.pp, this.settings.pp, 'pp');
 
+        // Check if ALL non-zero goals are met for fire animation
+        const playsMet = this.settings.plays > 0 ? this.progress.plays >= this.settings.plays : true;
+        const hitsMet = this.settings.hits > 0 ? this.progress.hits >= this.settings.hits : true;
+        const ppMet = this.settings.pp > 0 ? this.progress.pp >= this.settings.pp : true;
+        const starsMet = this.settings.stars > 0 ? this.progress.stars > 0 : true;
+
+        const allMet = playsMet && hitsMet && ppMet && starsMet && 
+                      (this.settings.plays > 0 || this.settings.hits > 0 || this.settings.pp > 0 || this.settings.stars > 0);
+
+        const streakPill = document.getElementById('streakPill');
+        if (streakPill) {
+            if (allMet) streakPill.classList.add('goal-met');
+            else streakPill.classList.remove('goal-met');
+        }
+
         if (!skipInputs) this.updateInputValues();
     }
 

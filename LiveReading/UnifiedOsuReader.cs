@@ -44,11 +44,14 @@ namespace OsuGrind.LiveReading
                 return;
             }
 
+            DebugService.Throttled("unified-init", "[UnifiedReader] Initialize called - no active reader or disconnected", "UnifiedReader");
+
             // Detect Lazer
             _lazerReader.Initialize();
             if (_lazerReader.IsConnected)
             {
                 _activeReader = _lazerReader;
+                DebugService.Log("[UnifiedReader] Connected to Lazer", "UnifiedReader");
                 return;
             }
 
@@ -57,6 +60,7 @@ namespace OsuGrind.LiveReading
             if (_stableReader.IsConnected)
             {
                 _activeReader = _stableReader;
+                DebugService.Log("[UnifiedReader] Connected to Stable", "UnifiedReader");
                 return;
             }
 

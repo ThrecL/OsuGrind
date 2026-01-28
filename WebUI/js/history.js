@@ -371,7 +371,14 @@ class HistoryModule {
                 const scoreData = JSON.parse(row.dataset.score || '{}');
                 this.openScoreAnalysis(scoreData);
             });
+
+            row.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const id = row.dataset.id;
+                if (window.app) window.app.showCtxMenu(e.pageX, e.pageY, id);
+            });
         });
+
 
         container.querySelectorAll('.score-action').forEach(btn => {
             btn.addEventListener('click', async (e) => {

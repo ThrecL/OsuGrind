@@ -40,13 +40,10 @@ public class ApiServer : IDisposable
         _cts = new CancellationTokenSource();
 
         _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://localhost:{Port}/");
         _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
         
-        // Listen on port 7777 for OAuth callback
         if (port != 7777)
         {
-            _listener.Prefixes.Add("http://localhost:7777/");
             _listener.Prefixes.Add("http://127.0.0.1:7777/");
         }
 
@@ -59,7 +56,13 @@ public class ApiServer : IDisposable
         {
             _listener.Start();
             _listenTask = Task.Run(ListenLoop);
-            Console.WriteLine($"[ApiServer] Listening on http://localhost:{Port}/");
+            Console.WriteLine($"[ApiServer] Listening on http://127.0.0.1:{Port}/");
+        }
+        catch (HttpListenerException ex)
+        {
+            Console.WriteLine($"[ApiServer] FATAL: Port {Port} initialization failed: {ex.Message}");
+            File.WriteAllText("api_server_error.txt", $"Port {Port} conflict or error. Ensure no other OsuGrind.exe is running.\n{ex}");
+            throw;
         }
         catch (Exception ex)
         {
@@ -72,7 +75,9 @@ public class ApiServer : IDisposable
     {
         _cts.Cancel();
         try { _listener.Stop(); } catch { }
-        _listenTask?.Wait(TimeSpan.FromSeconds(2));
+        try { _listener.Abort(); } catch { }
+        try { _listener.Close(); } catch { } 
+        _listenTask?.Wait(TimeSpan.FromSeconds(0.5));
     }
 
     private async Task ListenLoop()
@@ -317,7 +322,30 @@ public class ApiServer : IDisposable
                         if (topScores != null) { await SendJson(response, topScores); return; }
                     }
                 }
-                await SendJson(response, new { error = "Not logged in or failed to fetch" }, 401);
+                // Fallback to local top plays if not logged in or fetch failed
+                var localTop = await _db.GetTopPlaysAsync(100);
+                await SendJson(response, localTop);
+                break;
+            case "/api/update":
+                var updateResult = await UpdateService.CheckForUpdatesAsync();
+                await SendJson(response, updateResult);
+                break;
+            case "/api/update/install":
+                if (method == "POST")
+                {
+                    var payload = await ReadJsonBodyAsync<JsonElement>(context.Request);
+                    if (payload.TryGetProperty("zipUrl", out var zipProp))
+                    {
+                        string? zipUrl = zipProp.GetString();
+                        if (!string.IsNullOrEmpty(zipUrl))
+                        {
+                            bool success = await UpdateService.InstallUpdateAsync(zipUrl);
+                            await SendJson(response, new { success });
+                        }
+                        else await SendJson(response, new { error = "Missing zipUrl" }, 400);
+                    }
+                    else await SendJson(response, new { error = "Missing zipUrl property" }, 400);
+                }
                 break;
             default:
                 if (path.StartsWith("/api/play/")) {
@@ -353,44 +381,76 @@ public class ApiServer : IDisposable
         var daily = (days == -1) ? await _db.GetHourlyStatsTodayAsync() : await _db.GetDailyStatsAsync(days);
         var playsToday = await _db.GetPlaysTodayCountAsync();
         var streak = await _db.GetPlayStreakAsync();
-        
-        var recentSummary = await _db.GetAnalyticsSummaryAsync(7);
-        var baselineSummary = await _db.GetAnalyticsSummaryAsync(90); // 90 days for better baseline
-        
-        string form = "No Data";
-        if (summary.TotalPlays > 0)
-        {
-            double rPP = recentSummary.AvgPP;
-            double bPP = baselineSummary.AvgPP;
-            
-            if (rPP > bPP * 1.10) form = "Peak";
-            else if (rPP > bPP * 1.03) form = "Improving";
-            else if (rPP < bPP * 0.90) form = "Burnout";
-            else if (rPP < bPP * 0.96) form = "Slumping";
-            else form = "Stable";
-        }
 
-        // IMPROVED MENTALITY FORMULA
-        // Factors: Pass Rate (Focus), Accuracy (Precision), and Play Density
-        double mentality = 0; 
-        if (summary.TotalPlays > 0)
-        {
-            double passRate = (double)summary.TotalPlays > 0 ? (double)daily.Sum(d => d.PassCount) / summary.TotalPlays : 0;
-            double accFactor = summary.AvgAccuracy; // Already 0.0 to 1.0
-            
-            // Density Factor: Reward sessions with consistent play time
-            double hoursPlayed = summary.TotalDurationMs / 3600000.0;
-            double density = Math.Min(1.0, summary.TotalPlays / (hoursPlayed * 10 + 1)); // Target ~10 plays per hour
-
-            mentality = (passRate * 50.0) + (accFactor * 40.0) + (density * 10.0);
-        }
-
-        double peakPP = SettingsManager.Current.PeakPP;
-        // Fallback: use the best daily average ever recorded in the DB
         var allDaily = await _db.GetDailyStatsAsync(0);
-        double recordDailyAvg = allDaily.Any() ? allDaily.Max(d => d.AvgPP) : 1;
-        double referencePP = Math.Max(peakPP, recordDailyAvg);
+        double referencePP = allDaily.Any() ? allDaily.Max(d => d.AvgPP) : 1;
         if (referencePP <= 0) referencePP = 1;
+
+        var recentSummary = await _db.GetAnalyticsSummaryAsync(14); // 2 weeks
+        double currentRatio = referencePP > 0 ? recentSummary.AvgPP / referencePP : 0;
+        
+        string form = "Stable";
+        if (recentSummary.TotalPlays > 0)
+        {
+            if (currentRatio > 1.05) form = "Peak";
+            else if (currentRatio > 0.95) form = "Great";
+            else if (currentRatio > 0.85) form = "Stable";
+            else if (currentRatio > 0.70) form = "Slumping";
+            else form = "Burnout";
+        }
+
+        var mentalitySummary = await _db.GetAnalyticsSummaryAsync(3);
+        double mentality = 0; 
+        if (mentalitySummary.TotalPlays > 0)
+        {
+            double passRate = (double)mentalitySummary.PassCount / mentalitySummary.TotalPlays;
+            double accFactor = mentalitySummary.AvgAccuracy;
+            double hoursPlayed = mentalitySummary.TotalDurationMs / 3600000.0;
+            double density = Math.Min(1.0, mentalitySummary.TotalPlays / (hoursPlayed * 10 + 1));
+
+            double baseScore = (passRate * 50.0) + (accFactor * 40.0) + (density * 10.0);
+            
+            double multiplier = 1.0;
+            if (mentalitySummary.LastPlayedUtc.HasValue)
+            {
+                var lastPlayed = mentalitySummary.LastPlayedUtc.Value.ToLocalTime();
+                var inactivityDays = (DateTime.Now - lastPlayed).TotalDays;
+                multiplier = Math.Pow(0.9, Math.Max(0, inactivityDays - 0.5)); // Start decaying after 12 hours
+            }
+
+            double currentPerfMatch = mentalitySummary.AvgPP / referencePP;
+            double perfPenalty = 1.0;
+            if (currentPerfMatch < 0.85) perfPenalty = 0.8;
+            if (currentPerfMatch < 0.70) perfPenalty = 0.5;
+            if (currentPerfMatch < 0.50) perfPenalty = 0.2;
+
+            double goalPenalty = 1.0;
+            var goals = await _db.GetTodayGoalProgressAsync(SettingsManager.Current.GoalStars);
+            bool hasAnyGoals = SettingsManager.Current.GoalPlays > 0 || SettingsManager.Current.GoalHits > 0 || SettingsManager.Current.GoalPP > 0;
+            
+            if (hasAnyGoals)
+            {
+                double hour = DateTime.Now.Hour;
+                if (hour > 12)
+                {
+                    double targetProgress = (hour - 12) / 10.0; // 0.0 at 12pm, 1.0 at 10pm
+                    targetProgress = Math.Clamp(targetProgress, 0, 1.0);
+                    
+                    double actualProgress = 0;
+                    int goalCount = 0;
+                    if (SettingsManager.Current.GoalPlays > 0) { actualProgress += Math.Min(1.0, (double)goals.Plays / SettingsManager.Current.GoalPlays); goalCount++; }
+                    if (SettingsManager.Current.GoalHits > 0) { actualProgress += Math.Min(1.0, (double)goals.Hits / SettingsManager.Current.GoalHits); goalCount++; }
+                    if (SettingsManager.Current.GoalPP > 0) { actualProgress += Math.Min(1.0, goals.TotalPP / SettingsManager.Current.GoalPP); goalCount++; }
+                    
+                    double avgProgress = actualProgress / goalCount;
+                    if (avgProgress < targetProgress * 0.7) goalPenalty = 0.6;
+                }
+            }
+
+            mentality = baseScore * multiplier * perfPenalty * goalPenalty;
+        }
+
+        double sessionPerfMatch = summary.TotalPlays > 0 ? (summary.AvgPP / referencePP) * 100.0 : 0;
 
         return new {
             totalPlays = summary.TotalPlays,
@@ -401,7 +461,7 @@ public class ApiServer : IDisposable
             avgKeyRatio = summary.AvgKeyRatio,
             playsToday = playsToday,
             streak = streak,
-            perfMatch = summary.TotalPlays > 0 ? (summary.AvgPP / referencePP) * 100.0 : 0,
+            perfMatch = sessionPerfMatch,
             currentForm = form,
             mentality = Math.Clamp(mentality, 0, 100),
             dailyActivity = daily.Select(d => new {
@@ -415,7 +475,7 @@ public class ApiServer : IDisposable
             }),
             dailyPerformance = daily.Select(d => new {
                 date = d.Date,
-                match = (d.AvgPP / peakPP) * 100.0
+                match = (d.AvgPP / referencePP) * 100.0
             }),
             hitErrors = await GetRecentHitErrorsAsync(days)
         };

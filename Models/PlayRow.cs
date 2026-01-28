@@ -251,8 +251,9 @@ public sealed class PlayRow : INotifyPropertyChanged
             CursorOffsetsJson = c.CursorOffsetsJson,
             ReplayFile = c.ReplayFile,
             MapPath = c.MapPath,
-            ReplayHash = "", // CompletedPlay might not have ReplayHash populated yet, usually from import
+            ReplayHash = c.ReplayHash ?? "",
             Notes = "",
+
         };
     }
 

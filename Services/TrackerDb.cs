@@ -94,8 +94,8 @@ public class TrackerDb
         """;
         await cmd.ExecuteNonQueryAsync();
 
-        // Migrations
         await EnsureColumnAsync(conn, "plays", "pp_timeline", "ALTER TABLE plays ADD COLUMN pp_timeline TEXT NOT NULL DEFAULT '';");
+
         await EnsureColumnAsync(conn, "plays", "duration_ms", "ALTER TABLE plays ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0;");
         await EnsureColumnAsync(conn, "plays", "stars", "ALTER TABLE plays ADD COLUMN stars REAL;");
         await EnsureColumnAsync(conn, "plays", "pp", "ALTER TABLE plays ADD COLUMN pp REAL NOT NULL DEFAULT 0;");
@@ -135,13 +135,14 @@ public class TrackerDb
         await cmd.ExecuteNonQueryAsync();
     }
 
-    public async Task InsertPlayAsync(PlayRow row)
+    public async Task<long> InsertPlayAsync(PlayRow row)
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-        INSERT OR IGNORE INTO plays (score_id, created_at_utc, outcome, duration_ms, beatmap, beatmap_hash, mods, stars, accuracy, score, combo, count300, count100, count50, misses, pp, rank, hit_offsets, timeline, pp_timeline, aim_offsets, cursor_offsets, ur, replay_file, replay_hash, map_path, hit_errors, key_ratio)
+        INSERT INTO plays (score_id, created_at_utc, outcome, duration_ms, beatmap, beatmap_hash, mods, stars, accuracy, score, combo, count300, count100, count50, misses, pp, rank, hit_offsets, timeline, pp_timeline, aim_offsets, cursor_offsets, ur, replay_file, replay_hash, map_path, hit_errors, key_ratio)
         VALUES ($score_id, $created_at_utc, $outcome, $duration_ms, $beatmap, $beatmap_hash, $mods, $stars, $accuracy, $score, $combo, $count300, $count100, $count50, $misses, $pp, $rank, $hit_offsets, $timeline, $pp_timeline, $aim_offsets, $cursor_offsets, $ur, $replay_file, $replay_hash, $map_path, $hit_errors, $key_ratio);
+        SELECT last_insert_rowid();
         """;
 
         cmd.Parameters.AddWithValue("$score_id", row.ScoreId);
@@ -172,6 +173,26 @@ public class TrackerDb
         cmd.Parameters.AddWithValue("$map_path", row.MapPath ?? "");
         cmd.Parameters.AddWithValue("$hit_errors", row.HitErrorsJson ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("$key_ratio", row.KeyRatio);
+        
+        var result = await cmd.ExecuteScalarAsync();
+        return result != null ? (long)result : 0;
+    }
+
+    public async Task UpdatePlayAsync(PlayRow row)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE plays 
+            SET ur = $ur, hit_errors = $hit_errors, key_ratio = $key_ratio, replay_file = $replay_file, replay_hash = $replay_hash
+            WHERE id = $id
+        """;
+        cmd.Parameters.AddWithValue("$ur", row.UR);
+        cmd.Parameters.AddWithValue("$hit_errors", row.HitErrorsJson ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("$key_ratio", row.KeyRatio);
+        cmd.Parameters.AddWithValue("$replay_file", row.ReplayFile ?? "");
+        cmd.Parameters.AddWithValue("$replay_hash", row.ReplayHash ?? "");
+        cmd.Parameters.AddWithValue("$id", row.Id);
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -261,9 +282,9 @@ public class TrackerDb
             {
                 if (element.ValueKind == JsonValueKind.Number)
                 {
-                    // Compatibility with old double-only timeline
                     list.Add(new object[] { element.GetDouble() });
                 }
+
                 else if (element.ValueKind == JsonValueKind.Array)
                 {
                     var innerList = new List<object>();
@@ -389,45 +410,106 @@ public class TrackerDb
 
     public async Task<int> GetPlayStreakAsync()
     {
+        int targetPlays = SettingsManager.Current.GoalPlays;
+        int targetHits = SettingsManager.Current.GoalHits;
+        double targetStars = SettingsManager.Current.GoalStars;
+        int targetPP = SettingsManager.Current.GoalPP;
+
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        // Fetch all distinct dates with plays in local time, sorted descending
-        cmd.CommandText = "SELECT DISTINCT date(created_at_utc, 'localtime') as d FROM plays WHERE score > 0 ORDER BY d DESC";
-        
-        var dates = new List<DateTime>();
+        cmd.CommandText = """
+            SELECT 
+                date(created_at_utc, 'localtime') as d,
+                COUNT(1) as plays,
+                SUM(count300 + count100 + count50 + misses) as hits,
+                SUM(CASE WHEN stars >= $starThreshold THEN 1 ELSE 0 END) as star_plays,
+                SUM(pp) as total_pp
+            FROM plays 
+            WHERE score > 0 
+            GROUP BY d
+            ORDER BY d DESC
+        """;
+        cmd.Parameters.AddWithValue("$starThreshold", targetStars);
+
+        var history = new List<(DateTime Date, int Plays, int Hits, int StarPlays, double TotalPP)>();
         using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
             if (DateTime.TryParse(reader.GetString(0), out var dt))
-                dates.Add(dt.Date);
+            {
+                history.Add((
+                    dt.Date,
+                    reader.GetInt32(1),
+                    reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                    reader.IsDBNull(3) ? 0 : reader.GetInt32(3),
+                    reader.IsDBNull(4) ? 0 : reader.GetDouble(4)
+                ));
+            }
         }
 
-        if (dates.Count == 0) return 0;
+        if (history.Count == 0) return 0;
 
         var today = DateTime.Now.Date;
         var yesterday = today.AddDays(-1);
 
-        // If the most recent play is older than yesterday, streak is broken
-        if (dates[0] < yesterday) return 0;
-
         int streak = 0;
-        var current = today;
-        
-        // If today has no plays, start checking from yesterday
-        if (dates[0] == yesterday) current = yesterday;
-        else if (dates[0] != today) return 0; // Should be covered by < yesterday check
+        var currentCheck = today;
 
-        foreach (var date in dates)
-        {
-            if (date == current)
-            {
-                streak++;
-                current = current.AddDays(-1);
+        bool IsGoalMet(int p, int h, int s, double pp) {
+            if (targetPlays > 0 && p < targetPlays) return false;
+            if (targetHits > 0 && h < targetHits) return false;
+            if (targetStars > 0 && s < 1) return false; 
+            if (targetPP > 0 && pp < targetPP) return false;
+            return true;
+        }
+
+        int idx = 0;
+        
+        if (history.Count > 0 && history[0].Date == today) {
+            if (IsGoalMet(history[0].Plays, history[0].Hits, history[0].StarPlays, history[0].TotalPP)) {
+            } else {
+                currentCheck = yesterday;
+                idx = 1;
             }
-            else break;
+        } else {
+            currentCheck = yesterday;
+            idx = 0;
+        }
+
+        while (idx < history.Count) {
+            var entry = history[idx];
+            if (entry.Date == currentCheck) {
+                if (IsGoalMet(entry.Plays, entry.Hits, entry.StarPlays, entry.TotalPP)) {
+                    streak++;
+                    currentCheck = currentCheck.AddDays(-1);
+                    idx++;
+                } else {
+                    break;
+                }
+            } else if (entry.Date < currentCheck) {
+                break;
+            } else {
+                idx++; 
+            }
         }
 
         return streak;
+    }
+
+    public async Task<List<PlayRow>> GetTopPlaysAsync(int limit = 100)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"{PlaysSelectQuery} WHERE p.score > 0 ORDER BY p.pp DESC LIMIT $limit";
+        cmd.Parameters.AddWithValue("$limit", limit);
+        
+        var list = new List<PlayRow>();
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            list.Add(MapPlayRow(reader));
+        }
+        return list;
     }
 
     public async Task<AnalyticsSummary> GetAnalyticsSummaryAsync(int days)
@@ -435,7 +517,7 @@ public class TrackerDb
         using var conn = Open();
         using var cmd = conn.CreateCommand();
         string timeFilter = "";
-        if (days == -1) // TODAY
+        if (days == -1)
         {
             timeFilter = "AND date(created_at_utc, 'localtime') = date('now', 'localtime')";
         }
@@ -451,7 +533,9 @@ public class TrackerDb
                 AVG(pp),
                 AVG(accuracy),
                 AVG(ur),
-                AVG(key_ratio)
+                AVG(key_ratio),
+                SUM(CASE WHEN outcome = 'pass' THEN 1 ELSE 0 END),
+                MAX(created_at_utc)
             FROM plays 
             WHERE score > 0 {timeFilter}
         """;
@@ -465,10 +549,12 @@ public class TrackerDb
                 reader.IsDBNull(2) ? 0 : reader.GetDouble(2),
                 reader.IsDBNull(3) ? 0 : reader.GetDouble(3),
                 reader.IsDBNull(4) ? 0 : reader.GetDouble(4),
-                reader.IsDBNull(5) ? 0 : reader.GetDouble(5)
+                reader.IsDBNull(5) ? 0 : reader.GetDouble(5),
+                reader.IsDBNull(6) ? 0 : reader.GetInt32(6),
+                reader.IsDBNull(7) ? null : DateTime.Parse(reader.GetString(7), null, DateTimeStyles.RoundtripKind)
             );
         }
-        return new AnalyticsSummary(0, 0, 0, 0, 0, 0);
+        return new AnalyticsSummary(0, 0, 0, 0, 0, 0, 0, null);
     }
 
     public async Task<List<DailyStats>> GetDailyStatsAsync(int days)
@@ -477,10 +563,8 @@ public class TrackerDb
         using var cmd = conn.CreateCommand();
         
         string timeFilter = "";
-        if (days == -1) // TODAY
+        if (days == -1)
         {
-            // For "Today", we might want to group by hour or just show one point.
-            // Let's stick to one point for now, or just filter for today.
             timeFilter = "AND date(created_at_utc, 'localtime') = date('now', 'localtime')";
         }
         else if (days > 0)
@@ -541,11 +625,9 @@ public class TrackerDb
         using var conn = Open();
         using var cmd = conn.CreateCommand();
         
-        // 1. Delete invalid scores
         cmd.CommandText = "DELETE FROM plays WHERE score <= 0;";
         await cmd.ExecuteNonQueryAsync();
 
-        // 2. Clear old indexes
         cmd.CommandText = "DROP INDEX IF EXISTS idx_plays_created_map;";
         await cmd.ExecuteNonQueryAsync();
         cmd.CommandText = "DROP INDEX IF EXISTS idx_plays_created_hash_score;";
@@ -553,11 +635,9 @@ public class TrackerDb
         cmd.CommandText = "DROP INDEX IF EXISTS idx_plays_created_hash;";
         await cmd.ExecuteNonQueryAsync();
 
-        // 3. Delete duplicates (Keep only one per timestamp/map/score)
         cmd.CommandText = "DELETE FROM plays WHERE id NOT IN (SELECT MIN(id) FROM plays GROUP BY created_at_utc, beatmap_hash, score);";
         await cmd.ExecuteNonQueryAsync();
 
-        // 4. Create strict unique index
         cmd.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS idx_plays_dedup ON plays(created_at_utc, beatmap_hash, score);";
         await cmd.ExecuteNonQueryAsync();
 
@@ -883,11 +963,11 @@ public class TrackerDb
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        // Fetch hash, score, date to build unique signature
         cmd.CommandText = "SELECT beatmap_hash, score, created_at_utc FROM plays";
         
         var signatures = new HashSet<string>();
         using var reader = await cmd.ExecuteReaderAsync();
+
         while (await reader.ReadAsync())
         {
             var hash = reader.IsDBNull(0) ? "" : reader.GetString(0);
@@ -902,9 +982,10 @@ public class TrackerDb
 
     public record TotalStats(int totalPlays, long totalTimeMs);
     public record DailyAverageStats(double avgDailyAcc, double avgDailyPP);
-    public record AnalyticsSummary(int TotalPlays, long TotalDurationMs, double AvgPP, double AvgAccuracy, double AvgUR, double AvgKeyRatio);
+    public record AnalyticsSummary(int TotalPlays, long TotalDurationMs, double AvgPP, double AvgAccuracy, double AvgUR, double AvgKeyRatio, int PassCount, DateTime? LastPlayedUtc);
     
     public class DailyStats
+
     {
         public string Date { get; set; } = "";
         public int PlayCount { get; set; }

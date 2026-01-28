@@ -33,6 +33,8 @@ public class StableScoreDetector
 
     public LiveSnapshot? LastSnapshot { get; private set; }
 
+    private static DateTime _lastGoalSoundDate = DateTime.MinValue;
+
     public StableScoreDetector(TrackerDb db, SoundPlayer soundPlayer, ApiServer api)
     {
         _db = db;
@@ -51,7 +53,6 @@ public class StableScoreDetector
     {
         try
         {
-            // Strictly define states
             bool isPlaying = snapshot.StateNumber == 2;
             bool isResults = snapshot.StateNumber == 7;
             bool isMenu = snapshot.StateNumber == 0 || snapshot.StateNumber == 1 || snapshot.StateNumber == 4 || snapshot.StateNumber == 5 || snapshot.StateNumber == 11;
@@ -63,7 +64,6 @@ public class StableScoreDetector
                 _consecutiveResultScoreCount = 0;
             }
 
-            // Correct replay to live if memory now says LIVE
             if (isPlaying && _isReplaySession && !snapshot.IsReplay)
             {
                 _isReplaySession = false;
@@ -71,14 +71,12 @@ public class StableScoreDetector
                 DebugService.Log("[StableDetector] CORRECTED TO LIVE.", "Detector");
             }
 
-            // Handle State Transitions
             if (snapshot.StateNumber != _lastState)
             {
                 var now = DateTime.Now;
 
                 if (isPlaying && _lastState != 2)
                 {
-                    // Started Playing - Reset everything
                     _hasRecordedCurrentPlay = false;
                     _isReplaySession = snapshot.IsReplay;
                     _wasPlaying = !_isReplaySession;
@@ -92,7 +90,6 @@ public class StableScoreDetector
                     _lastTime = 0;
                     _pendingPassSnapshot = null;
                     
-                    // Add an initial clean 0-stats frame
                     _ppTimeline.Add(new object[] { 0.0, 0, 1.0, 0, 0, 0, 0, 0, 0, 0 });
                     
                     DebugService.Log($"[StableDetector] Play Started. MD5={snapshot.MD5Hash}, IsReplay={_isReplaySession}", "Detector");
@@ -104,7 +101,6 @@ public class StableScoreDetector
                 }
                 else if (isMenu)
                 {
-                    // Record pending pass when leaving results screen
                     if (_pendingPassSnapshot != null)
                     {
                         DebugService.Log($"[StableDetector] Left Results Screen. Recording Pass now. Score={_pendingPassSnapshot.Score}", "Detector");
@@ -125,12 +121,10 @@ public class StableScoreDetector
                 _lastStateChangeTime = now;
             }
 
-            // Results Screen Stabilization
             if (_waitingForResults && isResults && snapshot.IsResultsReady)
             {
                 long currentResultsScore = snapshot.Score ?? 0;
                 
-                // DATA STABILIZATION (Wait for memory to stop flickering)
                 if (currentResultsScore > 0 && currentResultsScore == _lastSeenResultScore)
                 {
                     _consecutiveResultScoreCount++;
@@ -141,25 +135,28 @@ public class StableScoreDetector
                     _consecutiveResultScoreCount = 1;
                 }
 
-                // If score is stable for 5 frames, capture it
                 if (_consecutiveResultScoreCount >= 5 && _pendingPassSnapshot == null)
                 {
+                    DebugService.Log($"[StableDetector] Score stable for 5 frames. Attempting capture. Score={snapshot.Score}, Combo={snapshot.MaxCombo}, Acc={snapshot.Accuracy:P2}, MapMaxCombo={snapshot.MapMaxCombo}, TotalObjects={snapshot.TotalObjects}", "Detector");
                     if (ValidateSnapshot(snapshot))
                     {
                         DebugService.Log($"[StableDetector] Results Data Captured and Stabilized. Score={snapshot.Score}, Combo={snapshot.MaxCombo}, Acc={snapshot.Accuracy:P2}", "Detector");
                         _pendingPassSnapshot = snapshot.Clone(); 
                         _waitingForResults = false;
-                        // Keep _wasPlaying true until we actually record it or leave menu
+                    }
+                    else
+                    {
+                        DebugService.Log($"[StableDetector] Validation failed! Resetting stabilization counter to wait for real data.", "Detector");
+                        _consecutiveResultScoreCount = 0;
+                        _lastSeenResultScore = -1;
                     }
                 }
             }
 
-            // FAIL / RETRY DETECTION
             if (isPlaying && _wasPlaying && LastSnapshot != null)
             {
                 int passedObjects = (snapshot.HitCounts?.Count300 ?? 0) + (snapshot.HitCounts?.Count100 ?? 0) + (snapshot.HitCounts?.Count50 ?? 0) + (snapshot.HitCounts?.Misses ?? 0);
 
-                // Record fail if HP = 0
                 if (snapshot.Failed && !_hasRecordedCurrentPlay && passedObjects > 0)
                 {
                     if (ValidateSnapshot(snapshot))
@@ -186,7 +183,6 @@ public class StableScoreDetector
                 }
             }
 
-            // EVENT-DRIVEN TIMELINE RECORDING
             if (isPlaying && _wasPlaying)
             {
                 int combo = snapshot.Combo ?? 0;
@@ -245,15 +241,53 @@ public class StableScoreDetector
 
     private bool ValidateSnapshot(LiveSnapshot s)
     {
-        if (s == null) return false;
-        if (string.IsNullOrEmpty(s.MD5Hash)) return false;
-        if (s.Score < 0 || s.Score > 4000000000) return false; 
-        if (s.Accuracy < 0 || s.Accuracy > 1.0001) return false;
+        if (s == null) { DebugService.Log("[StableDetector] Validate FAIL: snapshot is null", "Detector"); return false; }
+        if (string.IsNullOrEmpty(s.MD5Hash)) { DebugService.Log("[StableDetector] Validate FAIL: MD5Hash is empty", "Detector"); return false; }
+        if (s.Score < 0 || s.Score > 4000000000) { DebugService.Log($"[StableDetector] Validate FAIL: Score out of range ({s.Score})", "Detector"); return false; }
+        if (s.Accuracy < 0 || s.Accuracy > 1.0001) { DebugService.Log($"[StableDetector] Validate FAIL: Accuracy out of range ({s.Accuracy})", "Detector"); return false; }
+        
+        int totalHits = (s.HitCounts?.Count300 ?? 0) + (s.HitCounts?.Count100 ?? 0) + (s.HitCounts?.Count50 ?? 0) + (s.HitCounts?.Misses ?? 0);
+        
         if (s.StateNumber == 7)
         {
-            int totalHits = (s.HitCounts?.Count300 ?? 0) + (s.HitCounts?.Count100 ?? 0) + (s.HitCounts?.Count50 ?? 0) + (s.HitCounts?.Misses ?? 0);
-            if (totalHits == 0) return false;
+            if (totalHits == 0) { DebugService.Log("[StableDetector] Validate FAIL: Results screen but totalHits=0", "Detector"); return false; }
         }
+
+        if (s.MapMaxCombo > 0)
+        {
+            int capturedCombo = s.MaxCombo ?? s.Combo ?? 0;
+            if (capturedCombo > s.MapMaxCombo)
+            {
+                DebugService.Log($"[StableDetector] Validate FAIL: MaxCombo ({capturedCombo}) exceeds MapMaxCombo ({s.MapMaxCombo}). Likely stale data.", "Detector");
+                return false;
+            }
+        }
+
+        if (s.StateNumber == 7 && s.TotalObjects.HasValue && s.TotalObjects > 0)
+        {
+            double hitRatio = (double)totalHits / s.TotalObjects.Value;
+            if (hitRatio < 0.8 || hitRatio > 1.05)
+            {
+                DebugService.Log($"[StableDetector] Validate FAIL: HitRatio ({hitRatio:F2}) out of expected range. TotalHits={totalHits}, TotalObjects={s.TotalObjects}. Likely stale data.", "Detector");
+                return false;
+            }
+        }
+
+        DebugService.Log($"[StableDetector] Validate PASS: Score={s.Score}, Acc={s.Accuracy:P2}, Combo={s.MaxCombo ?? s.Combo}, MapMax={s.MapMaxCombo}, TotalHits={totalHits}, TotalObj={s.TotalObjects}", "Detector");
+        return true;
+    }
+
+    private bool IsGoalMet(TrackerDb.GoalProgress p)
+    {
+        int targetPlays = SettingsManager.Current.GoalPlays;
+        int targetHits = SettingsManager.Current.GoalHits;
+        double targetStars = SettingsManager.Current.GoalStars;
+        int targetPP = SettingsManager.Current.GoalPP;
+
+        if (targetPlays > 0 && p.Plays < targetPlays) return false;
+        if (targetHits > 0 && p.Hits < targetHits) return false;
+        if (targetStars > 0 && p.StarPlays < 1) return false;
+        if (targetPP > 0 && p.TotalPP < targetPP) return false;
         return true;
     }
 
@@ -392,6 +426,19 @@ public class StableScoreDetector
                 }
                 await _db.InsertPlayAsync(row);
                 await _api.BroadcastRefresh();
+
+                _ = Task.Run(async () => {
+                    if (!SettingsManager.Current.GoalSoundEnabled) return;
+                    if (_lastGoalSoundDate.Date == DateTime.Today) return;
+
+                    await Task.Delay(5000);
+                    var progress = await _db.GetTodayGoalProgressAsync(SettingsManager.Current.GoalStars);
+                    if (IsGoalMet(progress)) {
+                        _lastGoalSoundDate = DateTime.Today;
+                        DebugService.Log("[StableDetector] Goals completed! Playing streak.ogg", "Detector");
+                        _soundPlayer.PlayStreak();
+                    }
+                });
             }
             catch (Exception ex) { DebugService.Error($"[StableDetector] DB Error: {ex.Message}", "Detector"); }
         });

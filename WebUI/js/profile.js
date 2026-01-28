@@ -36,9 +36,16 @@ class ProfileModule {
     async loadProfile() {
         try {
             const data = await window.api.getProfile();
+            const wasLoggedIn = this.isLoggedIn;
             this.profile = data;
             this.isLoggedIn = data.isLoggedIn || false;
             this.updateHeaderUI();
+
+            // Refresh top plays if we just logged in
+            if (!wasLoggedIn && this.isLoggedIn) {
+                console.log('[Profile] Login detected, refreshing top plays...');
+                window.liveModule?.fetchTopPlays();
+            }
 
             // Update overlay if it's open
             const overlay = document.getElementById('profileOverlay');
@@ -98,8 +105,10 @@ class ProfileModule {
         // Username & Rank
         document.getElementById('profileUsername').textContent = p.username || 'Not logged in';
         document.getElementById('profileRank').innerHTML = p.globalRank
-            ? `Global <strong>#${p.globalRank.toLocaleString()}</strong> | Country <strong>#${(p.countryRank || 0).toLocaleString()}</strong>`
+            ? `<span>Global <strong>#${p.globalRank.toLocaleString()}</strong></span>
+               <span>Country <strong>#${(p.countryRank || 0).toLocaleString()}</strong></span>`
             : '';
+
 
         // Skill Badges
         this.renderSkillBadges(p.skills || []);

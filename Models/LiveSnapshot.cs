@@ -106,6 +106,7 @@ public sealed class LiveSnapshot
     public string? OsuFolder { get; set; }
     public string? Grade { get; set; }
     public double? Stars { get; set; }
+    public double? BaseStars { get; set; }
     public int MapMaxCombo { get; set; }
     public long? MaxScore { get; set; }
     public int? Circles { get; set; }
@@ -123,6 +124,7 @@ public sealed class LiveSnapshot
     public double? PPIfFC { get; set; }
     public HitCounts? HitCounts { get; set; }
     public int? BPM { get; set; }
+    public int? BaseBPM { get; set; }
     public int? MinBPM { get; set; }
     public int? MaxBPM { get; set; }
     public int? MostlyBPM { get; set; }
@@ -130,6 +132,10 @@ public sealed class LiveSnapshot
     public double? CS { get; set; }
     public double? OD { get; set; }
     public double? HP { get; set; }
+    public double? BaseAR { get; set; }
+    public double? BaseCS { get; set; }
+    public double? BaseOD { get; set; }
+    public double? BaseHP { get; set; }
     public double? LiveHP { get; set; }
     
     public double Progress { get; set; } // Map progress 0.0 to 1.0
@@ -168,6 +174,7 @@ public sealed class LiveSnapshot
             OsuFolder = this.OsuFolder,
             Grade = this.Grade,
             Stars = this.Stars,
+            BaseStars = this.BaseStars,
             MapMaxCombo = this.MapMaxCombo,
             MaxScore = this.MaxScore,
             Circles = this.Circles,
@@ -191,6 +198,7 @@ public sealed class LiveSnapshot
                 this.HitCounts.SmallTickHit, 
                 this.HitCounts.LargeTickHit) : null,
             BPM = this.BPM,
+            BaseBPM = this.BaseBPM,
             MinBPM = this.MinBPM,
             MaxBPM = this.MaxBPM,
             MostlyBPM = this.MostlyBPM,
@@ -198,6 +206,10 @@ public sealed class LiveSnapshot
             CS = this.CS,
             OD = this.OD,
             HP = this.HP,
+            BaseAR = this.BaseAR,
+            BaseCS = this.BaseCS,
+            BaseOD = this.BaseOD,
+            BaseHP = this.BaseHP,
             LiveHP = this.LiveHP,
             Progress = this.Progress,
             ModsList = this.ModsList != null ? new List<string>(this.ModsList) : null,

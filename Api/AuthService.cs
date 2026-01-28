@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using OsuGrind.Services;
@@ -11,62 +11,46 @@ namespace OsuGrind.Api;
 
 public class AuthService
 {
-    private static int ClientId;
-    private static string ClientSecret = "";
+    private const int ClientId = 47034;
     private const string RedirectUri = "http://localhost:7777/callback"; 
-
-    static AuthService()
-    {
-        try
-        {
-            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "secrets.json");
-            if (!File.Exists(path)) path = Path.Combine(Directory.GetCurrentDirectory(), "secrets.json");
-            
-            if (File.Exists(path))
-            {
-                var json = File.ReadAllText(path);
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement.GetProperty("OsuOAuth");
-                ClientId = root.GetProperty("ClientId").GetInt32();
-                ClientSecret = root.GetProperty("ClientSecret").GetString() ?? "";
-            }
-        }
-        catch (Exception ex)
-        {
-            DebugService.Error($"Failed to load secrets: {ex.Message}");
-        }
-    }
+    private const string TokenEndpoint = "https://osugrind.app/auth/token";
     
     private readonly HttpClient _http = new();
 
     public string GetAuthUrl()
     {
-        return $"https://osu.ppy.sh/oauth/authorize?client_id={ClientId}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&response_type=code&scope=public%20identify";
+        var url = $"https://osu.ppy.sh/oauth/authorize?client_id={ClientId}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&response_type=code&scope=public%20identify";
+        DebugService.Log($"Auth URL generated: {url}", "AuthService");
+        return url;
     }
 
     public async Task<string?> ExchangeCodeForTokenAsync(string code)
     {
-        var content = new FormUrlEncodedContent(new[]
+        try 
         {
-            new KeyValuePair<string, string>("client_id", ClientId.ToString()),
-            new KeyValuePair<string, string>("client_secret", ClientSecret),
-            new KeyValuePair<string, string>("code", code),
-            new KeyValuePair<string, string>("grant_type", "authorization_code"),
-            new KeyValuePair<string, string>("redirect_uri", RedirectUri)
-        });
+            var payload = new { code, redirect_uri = RedirectUri };
+            var jsonContent = new StringContent(
+                JsonSerializer.Serialize(payload), 
+                Encoding.UTF8, 
+                "application/json");
 
-        var response = await _http.PostAsync("https://osu.ppy.sh/oauth/token", content);
-        if (!response.IsSuccessStatusCode)
-        {
-            DebugService.Error($"Token exchange failed: {response.StatusCode} - {await response.Content.ReadAsStringAsync()}");
-            return null;
+            var response = await _http.PostAsync(TokenEndpoint, jsonContent);
+            if (!response.IsSuccessStatusCode)
+            {
+                DebugService.Error($"Token exchange failed: {response.StatusCode} - {await response.Content.ReadAsStringAsync()}");
+                return null;
+            }
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("access_token", out var token))
+            {
+                return token.GetString();
+            }
         }
-
-        var json = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(json);
-        if (doc.RootElement.TryGetProperty("access_token", out var token))
+        catch (Exception ex)
         {
-            return token.GetString();
+            DebugService.Error($"Auth Error: {ex.Message}");
         }
         return null;
     }

@@ -6,6 +6,8 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
 
+using OsuGrind.Services; // Add this
+
 namespace OsuGrind;
 
 public partial class App : System.Windows.Application
@@ -22,10 +24,23 @@ public partial class App : System.Windows.Application
         // Set AppUserModelID to unify Taskbar and Volume Mixer entries
         try { SetCurrentProcessExplicitAppUserModelID(AppId); } catch { }
 
-        // Check for existing instance
+        // Force kill any lingering instances of OsuGrind and its sub-processes
+        try
+        {
+            var currentProcess = Process.GetCurrentProcess();
+            // Kill by name to be thorough, including WebView2 children
+            var existingOsuGrind = Process.GetProcessesByName(currentProcess.ProcessName)
+                .Where(p => p.Id != currentProcess.Id);
+            
+            foreach (var p in existingOsuGrind)
+            {
+                try { p.Kill(true); p.WaitForExit(2000); } catch { }
+            }
+        }
+        catch { }
 
+        // Check for existing instance (Mutex fallback)
         _mutex = new Mutex(true, MutexName, out bool createdNew);
-
         if (!createdNew)
         {
             Current.Shutdown();
@@ -34,6 +49,9 @@ public partial class App : System.Windows.Application
 
         base.OnStartup(e);
 
+        // Start Tracking
+        try { TrackerService.Start(); } catch { }
+
         // Launch the WebView2-based window
         var mainWindow = new WebViewWindow();
         mainWindow.Show();
@@ -41,8 +59,15 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        try { TrackerService.Stop(); } catch { }
+        
         try { _mutex?.ReleaseMutex(); } catch { }
         _mutex?.Dispose();
+        
         base.OnExit(e);
+        
+        // Force the process to terminate, killing all remaining threads
+        Environment.Exit(0);
     }
 }
+

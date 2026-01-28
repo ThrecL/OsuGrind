@@ -11,8 +11,12 @@ using OsuGrind.Services;
 using OsuGrind.LiveReading;
 using System.Text.Json;
 using System.Threading;
+using System.Windows.Forms;
+using System.Drawing;
 
 namespace OsuGrind;
+
+
 
 
 /// <summary>
@@ -26,16 +30,17 @@ public partial class WebViewWindow : Window
     private readonly SoundPlayer _soundPlayer;
     private readonly IOsuMemoryReader _osuReader;
     private readonly CancellationTokenSource _cts;
+    private NotifyIcon? _notifyIcon;
 
     private Task? _gameLoopTask;
+
 
     public WebViewWindow()
     {
         // Core setup
         Title = "Osu!Grind";
-        Width = 1175;
-        Height = 815;
-
+        Width = 1225;
+        Height = 855;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         WindowStyle = WindowStyle.None;
         AllowsTransparency = false;
@@ -43,6 +48,7 @@ public partial class WebViewWindow : Window
         Background = System.Windows.Media.Brushes.Black;
 
         // Set Window Icon
+
         try
         {
             var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "WebUI", "osugrind_icon.png");
@@ -55,25 +61,17 @@ public partial class WebViewWindow : Window
 
         // Initialize services
 
-        _cts = new CancellationTokenSource();
         _db = new TrackerDb();
         _soundPlayer = new SoundPlayer();
         _apiServer = new ApiServer(_db);
         _osuReader = new UnifiedOsuReader(_db, _soundPlayer, _apiServer);
-        _osuReader.OnPlayRecorded += (success) =>
-        {
-            Dispatcher.Invoke(() =>
-            {
-                if (_webView?.CoreWebView2 != null)
-                {
-                    var json = JsonSerializer.Serialize(new { type = "playRecorded", success = success });
-                    _webView.CoreWebView2.PostWebMessageAsJson(json);
-                }
-            });
-        };
 
+        _cts = new CancellationTokenSource();
+
+        SetupNotifyIcon();
 
         // Forward global debug logs to WebView console AND WebSocket clients
+
         DebugService.OnMessageLogged += (msg, source, level) =>
         {
             try
@@ -125,7 +123,13 @@ public partial class WebViewWindow : Window
 
     private IntPtr WindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == 0x0084) // WM_NCHITTEST
+        if (msg == 0x0024) // WM_GETMINMAXINFO
+        {
+            WmGetMinMaxInfo(hwnd, lParam);
+            handled = true;
+        }
+        else if (msg == 0x0084) // WM_NCHITTEST
+
         {
             var mouseX = (int)(short)(lParam.ToInt64() & 0xFFFF);
             var mouseY = (int)(short)((lParam.ToInt64() >> 16) & 0xFFFF);
@@ -166,9 +170,69 @@ public partial class WebViewWindow : Window
         return IntPtr.Zero;
     }
 
+    private void WmGetMinMaxInfo(IntPtr hwnd, IntPtr lParam)
+    {
+        MINMAXINFO mmi = (MINMAXINFO)System.Runtime.InteropServices.Marshal.PtrToStructure(lParam, typeof(MINMAXINFO))!;
+
+        // Get the monitor that the window is currently on
+        IntPtr monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+
+        if (monitor != IntPtr.Zero)
+        {
+            MONITORINFO monitorInfo = new MONITORINFO();
+            monitorInfo.cbSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(MONITORINFO));
+            GetMonitorInfo(monitor, ref monitorInfo);
+
+            RECT rcWorkArea = monitorInfo.rcWork;
+            RECT rcMonitorArea = monitorInfo.rcMonitor;
+
+            mmi.ptMaxPosition.x = Math.Abs(rcWorkArea.Left - rcMonitorArea.Left);
+            mmi.ptMaxPosition.y = Math.Abs(rcWorkArea.Top - rcMonitorArea.Top);
+            mmi.ptMaxSize.x = Math.Abs(rcWorkArea.Right - rcWorkArea.Left);
+            mmi.ptMaxSize.y = Math.Abs(rcWorkArea.Bottom - rcWorkArea.Top);
+        }
+
+        System.Runtime.InteropServices.Marshal.StructureToPtr(mmi, lParam, true);
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MINMAXINFO
+    {
+        public POINT ptReserved;
+        public POINT ptMaxSize;
+        public POINT ptMaxPosition;
+        public POINT ptMinTrackSize;
+        public POINT ptMaxTrackSize;
+    };
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int x;
+        public int y;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public int dwFlags;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr handle, int flags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    private const int MONITOR_DEFAULTTONEAREST = 2;
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct RECT
@@ -179,7 +243,56 @@ public partial class WebViewWindow : Window
         public int Bottom;
     }
 
+    private void SetupNotifyIcon()
+    {
+        _notifyIcon = new NotifyIcon();
+        try
+        {
+            // Try specific app icon first, then fallback to resources or default
+            var rootIcon = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "osugrind.ico");
+            var resourceIcon = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "WebUI", "favicon.ico");
+            
+            if (File.Exists(rootIcon))
+            {
+                _notifyIcon.Icon = new Icon(rootIcon);
+            }
+            else if (File.Exists(resourceIcon))
+            {
+                _notifyIcon.Icon = new Icon(resourceIcon);
+            }
+            else
+            {
+                _notifyIcon.Icon = SystemIcons.Application;
+            }
+        }
+        catch { _notifyIcon.Icon = SystemIcons.Application; }
+
+        _notifyIcon.Text = "Osu!Grind";
+        _notifyIcon.Visible = false;
+        _notifyIcon.DoubleClick += (s, e) => ShowFromTray();
+        
+        var contextMenu = new ContextMenuStrip();
+        contextMenu.Items.Add("Show", null, (s, e) => ShowFromTray());
+        contextMenu.Items.Add("Exit", null, (s, e) => Close());
+        _notifyIcon.ContextMenuStrip = contextMenu;
+    }
+
+    private void HideToTray()
+    {
+        this.Hide();
+        if (_notifyIcon != null) _notifyIcon.Visible = true;
+    }
+
+    private void ShowFromTray()
+    {
+        this.Show();
+        this.WindowState = WindowState.Normal;
+        this.Activate();
+        if (_notifyIcon != null) _notifyIcon.Visible = false;
+    }
+
     private async void WebViewWindow_Loaded(object sender, RoutedEventArgs e)
+
     {
         try
         {
@@ -228,7 +341,7 @@ public partial class WebViewWindow : Window
             _webView.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
 
             // Navigate to the local server
-            _webView.CoreWebView2.Navigate($"http://localhost:{_apiServer.Port}/");
+            _webView.CoreWebView2.Navigate($"http://127.0.0.1:{_apiServer.Port}/");
 
             // Start game loop
             _gameLoopTask = Task.Run(GameLoop);
@@ -264,7 +377,11 @@ public partial class WebViewWindow : Window
                     case "minimize":
                         WindowState = WindowState.Minimized;
                         break;
+                    case "hideToTray":
+                        HideToTray();
+                        break;
                     case "maximize":
+
                         WindowState = WindowState == WindowState.Maximized 
                             ? WindowState.Normal 
                             : WindowState.Maximized;
@@ -350,9 +467,15 @@ public partial class WebViewWindow : Window
                         ar = snapshot?.AR ?? 0,
                         od = snapshot?.OD ?? 0,
                         hp = snapshot?.HP ?? 0,
+                        baseCS = snapshot?.BaseCS ?? 0,
+                        baseAR = snapshot?.BaseAR ?? 0,
+                        baseOD = snapshot?.BaseOD ?? 0,
+                        baseHP = snapshot?.BaseHP ?? 0,
                         liveHP = snapshot?.LiveHP,
                         stars = snapshot?.Stars ?? 0,
+                        baseStars = snapshot?.BaseStars ?? 0,
                         bpm = snapshot?.BPM ?? 0,
+                        baseBPM = snapshot?.BaseBPM ?? 0,
                         playState = snapshot?.PlayState ?? "Idle",
                         currentTime = (snapshot?.TimeMs ?? 0) / 1000.0,
                         totalTime = (snapshot?.TotalTimeMs ?? 0) / 1000.0,
@@ -392,11 +515,14 @@ public partial class WebViewWindow : Window
     private void WebViewWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         _cts.Cancel();
-        _gameLoopTask?.Wait(TimeSpan.FromSeconds(2));
-        _apiServer.Stop();
-        _osuReader.Dispose();
-        // _db.Dispose(); // TrackerDb handles its own connections
-
+        try { _gameLoopTask?.Wait(TimeSpan.FromMilliseconds(500)); } catch { }
+        try { _apiServer.Stop(); } catch { }
+        try { _osuReader.Dispose(); } catch { }
+        try { _webView.Dispose(); } catch { } 
+        try { _notifyIcon?.Dispose(); } catch { }
+        
+        // Force the application to exit immediately
+        System.Windows.Application.Current.Shutdown();
     }
 
     private class WebMessage

@@ -21,6 +21,7 @@ public class SettingsManager
 
         public bool PassSoundEnabled { get; set; } = true;
         public bool FailSoundEnabled { get; set; } = true;
+        public bool GoalSoundEnabled { get; set; } = true;
         public bool DebugLoggingEnabled { get; set; } = false;
         public string? AccessToken { get; set; }
         public string? Username { get; set; }
@@ -31,6 +32,8 @@ public class SettingsManager
         public int GoalHits { get; set; } = 5000;
         public double GoalStars { get; set; } = 5.0;
         public int GoalPP { get; set; } = 100;
+        
+        public string? UniqueId { get; set; } // For anonymous tracking
     }
 
 
@@ -62,7 +65,17 @@ public class SettingsManager
             if (string.IsNullOrEmpty(_current.StablePath))
             {
                 _current.StablePath = OsuStableImportService.AutoDetectStablePath();
-                if (!string.IsNullOrEmpty(_current.StablePath)) Save();
+            }
+            
+            // Generate Unique ID if missing
+            if (string.IsNullOrEmpty(_current.UniqueId))
+            {
+                _current.UniqueId = Guid.NewGuid().ToString();
+                Save();
+            }
+            else if (string.IsNullOrEmpty(_current.StablePath)) // Save if path was detected but ID existed
+            {
+                 Save();
             }
 
         }
@@ -93,6 +106,7 @@ public class SettingsManager
 
         if (dict.TryGetValue("passSoundEnabled", out var pse)) _current.PassSoundEnabled = IsTrue(pse);
         if (dict.TryGetValue("failSoundEnabled", out var fse)) _current.FailSoundEnabled = IsTrue(fse);
+        if (dict.TryGetValue("goalSoundEnabled", out var gse)) _current.GoalSoundEnabled = IsTrue(gse);
 
         if (dict.TryGetValue("debugLoggingEnabled", out var dle)) {
             _current.DebugLoggingEnabled = IsTrue(dle);

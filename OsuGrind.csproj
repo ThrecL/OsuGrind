@@ -80,12 +80,6 @@
   </ItemGroup>
 
 
-  <!-- Secrets -->
-  <ItemGroup>
-    <None Include="secrets.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\osuMissAnalyzer-missAnalyzer\OsuMissAnalyzer.Core\OsuMissAnalyzer.Core.csproj" />

@@ -6,6 +6,8 @@
 class OsuGrindApp {
     constructor() {
         this.currentTab = 'live';
+        this.previousTab = 'live';
+        this.lastNonSettingsTab = 'live';
         this.sessionStart = Date.now();
         this.playingTime = 0;
         this.isPlaying = false;
@@ -38,7 +40,7 @@ class OsuGrindApp {
                 if (window.goalsModule) window.goalsModule.refresh();
                 return;
             }
-            window.liveModule?.update(data);
+            window.liveModule?.updateUI(data);
         });
 
         // Initialize each module
@@ -49,17 +51,21 @@ class OsuGrindApp {
         if (window.profileModule) window.profileModule.init();
         if (window.goalsModule) window.goalsModule.init();
 
+        // Initialize context menu
+        this.ctxMenu = document.getElementById('contextMenu');
+        this.currentCtxId = null;
+        document.addEventListener('click', () => this.hideCtxMenu());
+        document.getElementById('ctxDeletePlay')?.addEventListener('click', () => this.handleCtxDelete());
+
         // Initial fetch for top-bar stats
         if (window.analyticsModule) window.analyticsModule.refresh(true);
 
-        // Listen for HUD updates from Rewind iframe
         window.addEventListener('message', (event) => {
             if (event.data.type === 'hudUpdate') {
                 try {
                     const data = event.data.data;
                     if (!data) return;
 
-                    // Diagnostic globals
                     window._lastRewindData = data;
                     
                     const ctx = window.historyModule ? window.historyModule.currentReplayContext : null;
@@ -96,30 +102,23 @@ class OsuGrindApp {
                     if (isAnalysis && ctx.statsTimeline && ctx.statsTimeline.length > 0) {
                         const timeline = ctx.statsTimeline;
                         
-                        // 2. STATE-MATCH SYNC (Object-to-Object)
-                        // Search backwards for the latest entry that doesn't exceed Rewind's hits AND combo
                         let bestIdx = 0;
                         for (let i = timeline.length - 1; i >= 0; i--) {
                             const entry = timeline[i];
                             const entryHits = entry[3] + entry[4] + entry[5] + entry[6];
                             const entryCombo = entry[8] || 0;
 
-                            // Sync Logic:
-                            // We want the entry that is at or before Rewind's state in both Hits and Combo.
-                            // This prevents jumping to a slider end/tick if the playback hasn't reached it.
                             if (entryHits <= targetHits && entryCombo <= rewindCombo) {
                                 bestIdx = i;
                                 break;
                             }
                         }
 
-                        // Intro Support: If no hits yet, find position by time to show metadata
                         if (targetHits === 0 && playbackTime >= 0 && bestIdx === 0) {
                             const lastEntry = timeline[timeline.length - 1];
                             const totalDurationMs = lastEntry[7] || 0;
                             let targetMs = playbackTime;
                             
-                            // Heuristic to detect if time is in seconds or ms
                             if (targetMs > 0 && targetMs < totalDurationMs / 10) targetMs *= 1000;
 
                             let low = 0, high = timeline.length - 1;
@@ -139,15 +138,12 @@ class OsuGrindApp {
                             lookupSucceeded = true;
                             const hasCurrentCombo = entry.length >= 9;
                             
-                            // PP
                             if (window.analysisSlots.pp) window.analysisSlots.pp.setValue(entry[0]);
                             
-                            // COMBO: Truth from live recording
                             if (window.analysisSlots.combo) {
                                 window.analysisSlots.combo.setValue(hasCurrentCombo ? entry[8] : entry[1]);
                             }
 
-                            // Accuracy & Hits Override
                             if (window.analysisSlots.acc) window.analysisSlots.acc.setValue(entry[2]);
                             if (window.analysisSlots.h300) window.analysisSlots.h300.setValue(entry[3]);
                             if (window.analysisSlots.h100) window.analysisSlots.h100.setValue(entry[4]);
@@ -166,7 +162,6 @@ class OsuGrindApp {
                         }
                     }
 
-                    // 3. Fallback: Use Rewind data directly (Imported replays)
                     if (!lookupSucceeded && window.analysisSlots) {
                         if (window.analysisSlots.acc) window.analysisSlots.acc.setValue(rewindAcc);
                         if (window.analysisSlots.combo) window.analysisSlots.combo.setValue(rewindCombo);
@@ -192,7 +187,53 @@ class OsuGrindApp {
             }
         });
 
-        console.log('[App] OsuGrind v1.2.0 initialized');
+        this.checkForUpdates();
+
+        console.log('[App] OsuGrind v1.0.0 initialized');
+    }
+
+    async checkForUpdates() {
+        try {
+            const res = await window.api.checkForUpdates();
+            if (res && res.available) {
+                this.showUpdateNotification(res.latestVersion, res.zipUrl);
+            }
+        } catch (e) {
+            console.error('[App] Update check failed:', e);
+        }
+    }
+
+    showUpdateNotification(version, zipUrl) {
+        const div = document.createElement('div');
+        div.className = 'update-notification';
+        div.innerHTML = `
+            <div class="update-content">
+                <span class="update-icon">🚀</span>
+                <div class="update-text">
+                    <div class="update-title">Update Available</div>
+                    <div class="update-desc">OsuGrind ${version} is ready!</div>
+                </div>
+            </div>
+            <div class="update-actions">
+                <button class="update-btn" id="installUpdateBtn">Install Now</button>
+                <button class="update-close" onclick="this.parentElement.parentElement.remove()">✕</button>
+            </div>
+        `;
+        document.body.appendChild(div);
+
+        document.getElementById('installUpdateBtn')?.addEventListener('click', async () => {
+            const btn = document.getElementById('installUpdateBtn');
+            btn.textContent = 'Downloading...';
+            btn.disabled = true;
+            try {
+                await window.api.installUpdate(zipUrl);
+            } catch (e) {
+                alert('Installation failed. Try manual download.');
+                console.error(e);
+                btn.textContent = 'Install Now';
+                btn.disabled = false;
+            }
+        });
     }
 
     setupTabs() {
@@ -202,54 +243,65 @@ class OsuGrindApp {
     }
 
     switchTab(tabName) {
+        if (this.currentTab === tabName) return;
+        console.log('[App] Switching to tab:', tabName);
+
         const tabs = ['live', 'analytics', 'history', 'settings'];
         const currentIndex = tabs.indexOf(this.currentTab);
         const newIndex = tabs.indexOf(tabName);
-        
-        // Determine direction
         const direction = newIndex > currentIndex ? 'right' : 'left';
-        
-        // Get current and new tab content
-        const currentContent = document.getElementById(`tab-${this.currentTab}`);
-        const newContent = document.getElementById(`tab-${tabName}`);
-        
-        // Add exiting animation to current tab
-        if (currentContent && currentContent.classList.contains('active')) {
-            currentContent.classList.add('exiting');
-            setTimeout(() => {
-                currentContent.classList.remove('active', 'exiting', 'from-left');
-            }, 200);
-        }
-        
-        // Update tab buttons
+
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
         
-        // Show new tab with direction-aware animation
-        setTimeout(() => {
-            if (newContent) {
-                newContent.classList.add('active');
-                if (direction === 'left') {
-                    newContent.classList.add('from-left');
-                }
-            }
-        }, 100);
+        const settingsBtn = document.getElementById('settingsBtn');
+        if (settingsBtn) settingsBtn.classList.toggle('active', tabName === 'settings');
+
+        document.querySelectorAll('.tab-content').forEach(c => {
+            c.classList.remove('active', 'from-left');
+        });
+
+        const newContent = document.getElementById(`tab-${tabName}`);
+        if (newContent) {
+            newContent.style.animation = 'none';
+            newContent.offsetHeight; 
+            newContent.style.animation = null;
+
+            if (direction === 'left') newContent.classList.add('from-left');
+            newContent.classList.add('active');
+        }
         
+        this.previousTab = this.currentTab;
+        if (tabName !== 'settings') this.lastNonSettingsTab = tabName;
         this.currentTab = tabName;
         
-        // Trigger module refresh
         if (tabName === 'analytics' && window.analyticsModule) window.analyticsModule.refresh();
         if (tabName === 'history' && window.historyModule) window.historyModule.refresh();
+        if (tabName === 'settings' && window.settingsModule) window.settingsModule.loadSettings();
     }
 
     setupWindowControls() {
-        document.getElementById('minimizeBtn')?.addEventListener('click', () => window.chrome?.webview?.postMessage({ action: 'minimize' }));
-        document.getElementById('maximizeBtn')?.addEventListener('click', () => window.chrome?.webview?.postMessage({ action: 'maximize' }));
-        document.getElementById('closeBtn')?.addEventListener('click', () => window.chrome?.webview?.postMessage({ action: 'close' }));
         document.getElementById('settingsBtn')?.addEventListener('click', () => {
-            const btn = document.getElementById('settingsBtn');
-            btn.classList.add('active');
-            setTimeout(() => btn.classList.remove('active'), 600);
-            this.switchTab('settings');
+            if (this.currentTab === 'settings') {
+                // If already in settings, go back to previous non-settings tab
+                this.switchTab(this.lastNonSettingsTab || 'live');
+            } else {
+                // Save current as last non-settings before switching
+                this.lastNonSettingsTab = this.currentTab;
+                this.switchTab('settings');
+            }
+        });
+        document.getElementById('minBtn')?.addEventListener('click', () => {
+            if (window.chrome?.webview) window.chrome.webview.postMessage({ action: 'minimize' });
+        });
+        document.getElementById('minBtn')?.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            if (window.chrome?.webview) window.chrome.webview.postMessage({ action: 'hideToTray' });
+        });
+        document.getElementById('maxBtn')?.addEventListener('click', () => {
+            if (window.chrome?.webview) window.chrome.webview.postMessage({ action: 'maximize' });
+        });
+        document.getElementById('closeBtn')?.addEventListener('click', () => {
+            if (window.chrome?.webview) window.chrome.webview.postMessage({ action: 'close' });
         });
         
         const titlebar = document.getElementById('titlebar');
@@ -271,9 +323,15 @@ class OsuGrindApp {
 
     updateTimers() {
         const sessionElapsed = Math.floor((Date.now() - this.sessionStart) / 1000);
-        document.getElementById('sessionTimer').textContent = this.formatTime(sessionElapsed);
-        if (this.isPlaying) this.playingTime++;
-        document.getElementById('playingTimer').textContent = this.formatTime(this.playingTime);
+        const sessionEl = document.getElementById('sessionTimer');
+        if (sessionEl) sessionEl.textContent = this.formatTime(sessionElapsed);
+
+        if (this.isPlaying) {
+            this.playingTime++;
+        }
+        
+        const playingEl = document.getElementById('playingTimer');
+        if (playingEl) playingEl.textContent = this.formatTime(this.playingTime);
     }
 
     formatTime(seconds) {
@@ -284,13 +342,52 @@ class OsuGrindApp {
     }
 
     setPlaying(isPlaying) { this.isPlaying = isPlaying; }
+    
     updatePlaysToday(count) {
         const el = document.getElementById('playsToday');
         if (el) el.textContent = `${count} play${count !== 1 ? 's' : ''}`;
     }
+    
     updateStreak(days) {
         const pill = document.getElementById('streakPill'), count = document.getElementById('streakCount');
-        if (days > 0) { pill.style.display = 'flex'; count.textContent = days; } else { pill.style.display = 'none'; }
+        if (pill) pill.style.display = 'flex';
+        if (count) count.textContent = days || 0;
+    }
+
+    showCtxMenu(x, y, id) {
+        if (!this.ctxMenu) return;
+        this.currentCtxId = id;
+        this.ctxMenu.style.display = 'block';
+        this.ctxMenu.style.left = x + 'px';
+        this.ctxMenu.style.top = y + 'px';
+    }
+
+    hideCtxMenu() {
+        if (this.ctxMenu) this.ctxMenu.style.display = 'none';
+    }
+
+    async handleCtxDelete() {
+        if (!this.currentCtxId) return;
+        if (confirm('Delete this score?')) {
+            try {
+                await window.api.deletePlay(this.currentCtxId);
+                console.log('[App] Deleted play:', this.currentCtxId);
+                // Re-refresh history if on that tab
+                if (this.currentTab === 'history' && window.historyModule) {
+                    if (window.historyModule.selectedDate) {
+                        await window.historyModule.showDayDetail(window.historyModule.selectedDate);
+                    } else {
+                        await window.historyModule.refresh();
+                    }
+                }
+                // Also refresh recent in live tab
+                if (window.liveModule) window.liveModule.fetchRecent();
+                // Refresh analytics
+                if (window.analyticsModule) window.analyticsModule.refresh(true);
+            } catch (e) {
+                console.error('[App] Delete failed:', e);
+            }
+        }
     }
 
     initDebugConsole() {
@@ -300,8 +397,10 @@ class OsuGrindApp {
         if (document.getElementById('closeDebug')) document.getElementById('closeDebug').onclick = () => { this.debugConsole.style.display = 'none'; };
         window.addEventListener('keydown', (e) => {
             if (e.key.toLowerCase() === 'd' && (e.ctrlKey || e.shiftKey)) {
-                const isHidden = this.debugConsole.style.display === 'none';
-                this.debugConsole.style.display = isHidden ? 'flex' : 'none';
+                if (this.debugConsole) {
+                    const isHidden = this.debugConsole.style.display === 'none';
+                    this.debugConsole.style.display = isHidden ? 'flex' : 'none';
+                }
             }
         });
     }

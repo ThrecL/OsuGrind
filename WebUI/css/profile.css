@@ -13,15 +13,6 @@
     }
 }
 
-@keyframes avatarPulse {
-    0%, 100% {
-        box-shadow: 0 0 0 0 rgba(255, 102, 171, 0.7);
-    }
-    50% {
-        box-shadow: 0 0 0 10px rgba(255, 102, 171, 0);
-    }
-}
-
 /* Main Modal Container */
 .profile-modal-new {
     position: relative;
@@ -65,15 +56,15 @@
     position: relative;
     z-index: 2;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: 20px;
-    padding: 0 32px 20px 32px;
+    padding: 0 32px 50px 32px; /* Increased bottom padding to move elements up further */
     height: 100%;
 }
 
 .profile-avatar-wrapper {
     position: relative;
-    margin-bottom: -30px;
+    margin-bottom: 0px; /* Removed negative margin to move avatar up */
 }
 
 .profile-avatar-new {
@@ -84,27 +75,34 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4),
                 0 0 0 2px rgba(255, 102, 171, 0.3);
     object-fit: cover;
-    animation: avatarPulse 3s ease-in-out infinite;
 }
 
 .profile-user-info {
     flex: 1;
-    padding-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    padding-bottom: 0;
 }
 
 .profile-username-new {
     font-size: 28px;
     font-weight: 900;
-    margin: 0 0 4px 0;
+    margin: 0;
     color: white;
     text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
     letter-spacing: -0.5px;
+    line-height: 1.1;
 }
 
 .profile-rank-new {
     font-size: 13px;
     color: var(--text-secondary);
     font-weight: 600;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .profile-rank-new strong {
@@ -117,24 +115,12 @@
     padding: 40px 32px 32px 32px;
     overflow-y: auto;
     max-height: calc(90vh - 200px);
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none;  /* IE and Edge */
 }
 
 .profile-content-new::-webkit-scrollbar {
-    width: 8px;
-}
-
-.profile-content-new::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 4px;
-}
-
-.profile-content-new::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-}
-
-.profile-content-new::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.15);
+    display: none !important; /* Chrome, Safari and Opera - added !important to be sure */
 }
 
 /* Section Styling */

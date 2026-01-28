@@ -30,6 +30,12 @@ public sealed class SoundPlayer : IDisposable
         PlaySound("fail.ogg");
     }
 
+    public void PlayStreak()
+    {
+        PlaySound("streak.ogg");
+    }
+
+
     private void PlaySound(string fileName)
     {
         try

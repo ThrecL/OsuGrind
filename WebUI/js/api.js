@@ -30,6 +30,8 @@ class OsuGrindAPI {
                 clearTimeout(this.wsReconnectTimer);
                 this.wsReconnectTimer = null;
             }
+            // Trigger top plays refresh on connect
+            window.liveModule?.fetchTopPlays();
         };
 
 
@@ -43,9 +45,8 @@ class OsuGrindAPI {
                     }
                     this.liveCallbacks.forEach(cb => cb(data));
                 } else if (payload.type === 'log') {
-                    this.liveCallbacks.forEach(cb => cb({ type: 'log', message: payload.message, level: payload.level }));
-                } else if (payload.type === 'refresh') {
-                    this.liveCallbacks.forEach(cb => cb({ type: 'refresh' }));
+
+                    this.logCallbacks.forEach(cb => cb(payload.message, payload.level));
                 } else {
                     // Backwards compatibility for old raw data if any
                     this.liveCallbacks.forEach(cb => cb(payload));
@@ -127,20 +128,13 @@ class OsuGrindAPI {
                     ...options.headers
                 }
             });
-            const data = await response.json();
-            if (!response.ok) {
-                const errorMsg = data.message || data.error || `HTTP ${response.status}`;
-                throw new Error(errorMsg);
-            }
-            return data;
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.json();
         } catch (error) {
-            if (error.message.startsWith('HTTP')) {
-                 console.error(`[API] ${endpoint} failed:`, error);
-            }
+            console.error(`[API] ${endpoint} failed:`, error);
             throw error;
         }
     }
-
 
     // History
     async getHistoryForDate(date) {
@@ -166,7 +160,13 @@ class OsuGrindAPI {
     }
 
     async getTopPlays() {
-        return this.fetch('/api/profile/top');
+        try {
+            return await this.fetch('/api/profile/top');
+        } catch (e) {
+            console.warn('[API] Online top plays fetch failed, falling back to local DB');
+            // Backend already handles fallback but we catch just in case
+            return [];
+        }
     }
 
     // Settings
@@ -208,7 +208,19 @@ class OsuGrindAPI {
         });
     }
 
+    async checkForUpdates() {
+        return this.fetch('/api/update');
+    }
+
+    async installUpdate(zipUrl) {
+        return this.fetch('/api/update/install', {
+            method: 'POST',
+            body: JSON.stringify({ zipUrl })
+        });
+    }
+
     async saveCursorOffsets(scoreId, offsets) {
+
         return this.fetch('/api/rewind/cursor-offsets', {
             method: 'POST',
             body: JSON.stringify({ scoreId, offsets })

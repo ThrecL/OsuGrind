@@ -15,33 +15,41 @@ class SettingsModule {
     }
 
     setupEventListeners() {
-        // Toggle switches
         document.getElementById('passSound')?.addEventListener('change', (e) => {
             this.settings.passSoundEnabled = e.target.checked;
             this.saveSettings();
         });
+
 
         document.getElementById('failSound')?.addEventListener('change', (e) => {
             this.settings.failSoundEnabled = e.target.checked;
             this.saveSettings();
         });
 
+        document.getElementById('goalSound')?.addEventListener('change', (e) => {
+            this.settings.goalSoundEnabled = e.target.checked;
+            this.saveSettings();
+        });
+
         document.getElementById('debugLogging')?.addEventListener('change', (e) => {
+
             this.settings.debugLoggingEnabled = e.target.checked;
             this.saveSettings();
         });
 
-        // Action buttons
         document.getElementById('importLazerBtn')?.addEventListener('click', () => this.importLazer());
         document.getElementById('importStableBtn')?.addEventListener('click', () => this.importStable());
         document.getElementById('exportCsvBtn')?.addEventListener('click', () => this.exportCsv());
         
-        // Delete buttons
         document.getElementById('deleteScoresBtn')?.addEventListener('click', () => this.deleteAllScores());
         document.getElementById('deleteBeatmapsBtn')?.addEventListener('click', () => this.deleteAllBeatmaps());
+
+        
+        document.getElementById('checkUpdatesBtn')?.addEventListener('click', () => this.checkUpdates());
     }
 
     async loadSettings() {
+
         try {
             this.settings = await window.api.getSettings();
             this.updateUI();
@@ -54,8 +62,10 @@ class SettingsModule {
         const s = this.settings;
         document.getElementById('passSound').checked = s.passSoundEnabled || false;
         document.getElementById('failSound').checked = s.failSoundEnabled || false;
+        if (document.getElementById('goalSound')) document.getElementById('goalSound').checked = s.goalSoundEnabled || false;
         document.getElementById('debugLogging').checked = s.debugLoggingEnabled || false;
     }
+
 
     async saveSettings() {
         try {
@@ -114,7 +124,33 @@ class SettingsModule {
         }
     }
 
+    async checkUpdates() {
+        const btn = document.getElementById('checkUpdatesBtn');
+        const originalText = btn.textContent;
+        btn.textContent = 'Checking...';
+        btn.disabled = true;
+
+        try {
+            const res = await window.api.checkForUpdates();
+            if (res && res.available) {
+                if (confirm(`New version ${res.latestVersion} available! Would you like to install it automatically?`)) {
+                    btn.textContent = 'Installing...';
+                    await window.api.installUpdate(res.zipUrl);
+                }
+            } else {
+                alert('You are up to date! (v1.0.0)');
+            }
+        } catch (e) {
+            alert('Update check failed. See console.');
+            console.error(e);
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+
     async exportCsv() {
+
         window.api.exportCsv();
     }
 

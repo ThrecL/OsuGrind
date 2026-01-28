@@ -93,6 +93,11 @@ namespace OsuGrind.LiveReading
 
         private LazerScoreDetector? _detector;
         private IntPtr _lastResultScoreInfoPtr = IntPtr.Zero;
+        private float _baseCS;
+        private float _baseAR;
+        private float _baseOD;
+        private float _baseHP;
+        private double _baseStars;
 
         private class CachedBeatmapStats
         {
@@ -123,6 +128,7 @@ namespace OsuGrind.LiveReading
         public void Dispose()
         {
             _scanner?.Dispose();
+            _rosuService?.Dispose();
         }
 
         private const string ScalingContainerTargetDrawSizePattern = "00 00 80 44 00 00 40 44 00 00 00 00 ?? ?? ?? ?? 00 00 00 00";
@@ -1073,7 +1079,13 @@ namespace OsuGrind.LiveReading
                 // DebugService.Log($"GetStats: ReadBeatmap returned {beatmapInfoPtr:X}");
                 UpdateBeatmapFile(beatmapInfoPtr); // Update _currentOsuFilePath for PP calculation
 
+                if (beatmapInfoPtr != IntPtr.Zero)
+                {
+                    snapshot.MapPath = _currentOsuFilePath;
+                }
+                
                 IntPtr playerScreen = CheckIfPlayer(currentScreen) ? currentScreen : IntPtr.Zero;
+
                 IntPtr resultScreen = (playerScreen == IntPtr.Zero && CheckIfResultScreen(currentScreen)) ? currentScreen : IntPtr.Zero;
                 
                 // If we are playing, boost screen scan rate next frame
@@ -1148,12 +1160,20 @@ namespace OsuGrind.LiveReading
                         snapshot.StateNumber = 7; // Results
                         snapshot.IsPlaying = false;
                         snapshot.Passed = true; 
+                        snapshot.Failed = false; // Results screen implies a pass, ignore any lingering fail flags
                         
                         if (_lastResultScoreInfoPtr != IntPtr.Zero)
                         {
                             UpdateResultScreenSnapshot(_lastResultScoreInfoPtr, snapshot);
+                            // Verify data is "ready" by checking if we have valid-looking stats
+                            if ((snapshot.Score ?? 0) > 0 && snapshot.HitCounts != null)
+                            {
+                                snapshot.IsResultsReady = true;
+                            }
                         }
                     }
+
+
                     // Priority 2: Playing (Player Screen Active)
                     else if (playerScreen != IntPtr.Zero)
                     {
@@ -1329,7 +1349,6 @@ namespace OsuGrind.LiveReading
                                  {
                                      snapshot.PPIfFC = _cachedStats.PPIfFC;
                                      snapshot.MaxCombo = _cachedStats.MaxCombo;
-                                     snapshot.MapMaxCombo = _cachedStats.MaxCombo;
                                      snapshot.Combo = _cachedStats.MaxCombo; // Show max combo in song select
                                      snapshot.Score = _cachedStats.MaxScore;
                                      snapshot.Stars = _cachedStats.Stars;
@@ -1346,7 +1365,6 @@ namespace OsuGrind.LiveReading
                                      {
                                          snapshot.TotalTimeMs = (int)(_cachedStats.MapLength / clockRate);
                                          snapshot.TimeMs = snapshot.TotalTimeMs; // Show full length in Song Select
-                                         snapshot.Progress = 1.0;
                                      }
                                 }
                             }
@@ -1381,11 +1399,18 @@ namespace OsuGrind.LiveReading
 
                 // Always populate attributes from static cache
                 snapshot.Stars = (_staticStars > 0) ? _staticStars : snapshot.Stars;
+                snapshot.BaseStars = _baseStars;
                 snapshot.BPM = (int?)Math.Round(_staticBpm);
+                snapshot.BaseBPM = (int?)Math.Round(_baseModeBpm);
                 snapshot.MinBPM = (int?)Math.Round(_minBpm);
                 snapshot.MaxBPM = (int?)Math.Round(_maxBpm);
                 snapshot.MostlyBPM = (int?)Math.Round(_staticBpm);
                 
+                snapshot.BaseCS = _baseCS;
+                snapshot.BaseAR = _baseAR;
+                snapshot.BaseOD = _baseOD;
+                snapshot.BaseHP = _baseHP;
+
                 snapshot.Circles = _circles;
                 snapshot.Sliders = _sliders;
                 snapshot.Spinners = _spinners;
@@ -1628,6 +1653,10 @@ namespace OsuGrind.LiveReading
                 snapshot.Accuracy = _scanner.ReadDouble(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.Accuracy));
                 snapshot.MaxCombo = _scanner.ReadInt32(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.MaxCombo));
 
+                // Read Replay Hash from ScoreInfo
+                snapshot.ReplayHash = ReadScoreHash(scoreInfoPtr);
+
+
                 // Read Maximum Statistics for reliable total object count
                 IntPtr maxStatsDict = _scanner.ReadIntPtr(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.maximumStatistics));
                 if (maxStatsDict != IntPtr.Zero)
@@ -1812,12 +1841,6 @@ namespace OsuGrind.LiveReading
                         }
                         snapshot.IsPaused = _isPausedState;
                         snapshot.TimeMs = (int)currentTime;
-                        
-                        if (_cachedStats != null && _cachedStats.MapLength > 0)
-                        {
-                            double totalTime = _cachedStats.MapLength / clockRate;
-                            if (totalTime > 0) snapshot.Progress = Math.Clamp(currentTime / totalTime, 0, 1);
-                        }
                     }
                 }
 
@@ -1852,6 +1875,7 @@ namespace OsuGrind.LiveReading
         }
 
         private long ReadResultScoreInfo(IntPtr scoreInfoPtr, LiveSnapshot snapshot)
+
         {
             long standardizedScore = _scanner.ReadInt64(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.TotalScore));
             snapshot.Accuracy = _scanner.ReadDouble(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.Accuracy));
@@ -1889,8 +1913,8 @@ namespace OsuGrind.LiveReading
                 long standardizedScore = ReadResultScoreInfo(scoreInfoPtr, snapshot);
                 
                 // Read Replay Hash from ScoreInfo
-                snapshot.MD5Hash = ReadScoreHash(scoreInfoPtr) ?? snapshot.MD5Hash;
-                snapshot.ReplayHash = snapshot.MD5Hash; // In Lazer, score hash is often the filename in 'files'
+                snapshot.ReplayHash = ReadScoreHash(scoreInfoPtr);
+
 
                 // Read Maximum Statistics for reliable total object count
                 IntPtr maxStatsDict = _scanner.ReadIntPtr(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.maximumStatistics));
@@ -1963,6 +1987,15 @@ namespace OsuGrind.LiveReading
                 snapshot.ModsList = modsList;
                 snapshot.Mods = modsList.Count > 0 ? string.Join(",", modsList) : "NM";
 
+                // Read HitEvents from ScoreInfo on results screen
+                try {
+                    IntPtr hitEventsList = _scanner.ReadIntPtr(IntPtr.Add(scoreInfoPtr, Offsets.ScoreInfo.HitEvents));
+                    if (hitEventsList != IntPtr.Zero) {
+                        ReadHitEventsFromList(hitEventsList, snapshot);
+                    }
+                } catch { }
+
+
             }
             catch (Exception ex)
             {
@@ -2023,8 +2056,20 @@ namespace OsuGrind.LiveReading
             try
             {
                 IntPtr hitEventsList = _scanner.ReadIntPtr(IntPtr.Add(scoreProcessorPtr, Offsets.ScoreProcessor.hitEvents));
-                if (hitEventsList == IntPtr.Zero) return;
+                ReadHitEventsFromList(hitEventsList, snapshot);
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"ReadHitEvents Error: {ex.Message}");
+            }
+        }
 
+        private void ReadHitEventsFromList(IntPtr hitEventsList, LiveSnapshot snapshot)
+        {
+            if (hitEventsList == IntPtr.Zero) return;
+
+            try
+            {
                 // .NET List<T> layout: +0x8 items, +0x10 size
                 int count = _scanner.ReadInt32(IntPtr.Add(hitEventsList, 0x10));
                 if (count <= 0 || count > 30000) return;
@@ -2073,7 +2118,7 @@ namespace OsuGrind.LiveReading
                 }
 
                 snapshot.LiveHitOffsets = offsets;
-                snapshot.LiveUR = CalculateLiveUR(offsets, GetClockRate());
+                snapshot.LiveUR = CalculateLiveUR(offsets, RosuService.GetClockRateFromMods(GetModsBits(snapshot.ModsList)));
 
                 // Generate histogram (5ms bins)
                 var histogram = new Dictionary<int, int>();
@@ -2090,9 +2135,10 @@ namespace OsuGrind.LiveReading
             }
             catch (Exception ex)
             {
-                WriteLog($"ReadHitEvents Error: {ex.Message}");
+                WriteLog($"ReadHitEventsFromList Error: {ex.Message}");
             }
         }
+
 
         private double CalculateLiveUR(List<double> offsets, double clockRate = 1.0)
         {
@@ -2119,44 +2165,44 @@ namespace OsuGrind.LiveReading
         {
             if (dictAddr == IntPtr.Zero) return;
 
-            int count = _scanner.ReadInt32(IntPtr.Add(dictAddr, 0x38)); // _count
-            IntPtr entriesPtr = _scanner.ReadIntPtr(IntPtr.Add(dictAddr, 0x10)); // _entries (Array)
+            // .NET Dictionary<TKey, TValue> layout (64-bit CoreCLR)
+            // _count is at 0x38 (modern .NET) or 0x18 (older)
+            int count = _scanner.ReadInt32(IntPtr.Add(dictAddr, 0x38)); 
+            if (count < 0 || count > 50000) count = _scanner.ReadInt32(IntPtr.Add(dictAddr, 0x18));
+            if (count < 0 || count > 50000) return;
 
+            // _entries is at 0x10 (modern) or 0x18?
+            IntPtr entriesPtr = _scanner.ReadIntPtr(IntPtr.Add(dictAddr, 0x10)); 
             if (entriesPtr == IntPtr.Zero) return;
 
             int hit300 = 0, hit100 = 0, hit50 = 0, hitMiss = 0;
             int hitSliderTail = 0, hitSmallTick = 0, hitLargeTick = 0;
-            int hitSmallBonus = 0, hitLargeBonus = 0;
 
             for (int i = 0; i < count; i++)
             {
+                // struct Entry { int hash; int next; int key; int value; } size=16
                 IntPtr entryAddr = IntPtr.Add(entriesPtr, 0x10 + (i * 0x10));
 
                 int key = _scanner.ReadInt32(IntPtr.Add(entryAddr, 0x8));
                 int value = _scanner.ReadInt32(IntPtr.Add(entryAddr, 0xC));
 
-                if (key == 0) continue;
+                if (key <= 0 || value < 0) continue;
 
-                switch ((LazerHitResults)key)
+                LazerHitResults result = (LazerHitResults)key;
+                switch (result)
                 {
                     case LazerHitResults.Great: hit300 += value; break;
-                    case LazerHitResults.Perfect: hit300 += value; break; // Map Perfect to 300 for display
-                    case LazerHitResults.Good: hit100 += value; break; // Map Good to 100/200 for display
+                    case LazerHitResults.Perfect: hit300 += value; break;
+                    case LazerHitResults.Good: hit100 += value; break; 
                     case LazerHitResults.Ok: hit100 += value; break;
                     case LazerHitResults.Meh: hit50 += value; break;
                     case LazerHitResults.Miss: hitMiss += value; break;
-                    case LazerHitResults.SliderTailHit: hitSliderTail = value; break;
-                    case LazerHitResults.SmallTickHit: hitSmallTick = value; break;
-                    case LazerHitResults.LargeTickHit: hitLargeTick = value; break;
-                    case LazerHitResults.SmallBonus: hitSmallBonus = value; break; // Spinner Ticks
-                    case LazerHitResults.LargeBonus: hitLargeBonus = value; break; // Spins
+                    case LazerHitResults.SliderTailHit: hitSliderTail += value; break;
+                    case LazerHitResults.SmallTickHit: hitSmallTick += value; break;
+                    case LazerHitResults.LargeTickHit: hitLargeTick += value; break;
                 }
-                // DictEntry logging removed - too verbose
             }
             snapshot.HitCounts = new HitCounts(hit300, hit100, hit50, hitMiss, hitSliderTail, hitSmallTick, hitLargeTick);
-            WriteLogThrottled("stats-dict", $"ReadStatisticsDict: 300={hit300}, 100={hit100}, 50={hit50}, miss={hitMiss}, LargeTick={hitLargeTick}, SmallTick={hitSmallTick}, SliderTail={hitSliderTail}");
-            // Log full dict if key > 10 found or miss count mismatch
-            // WriteLog("Full HitCounts: " + string.Join(", ", snapshot.HitCounts.ToString()));
         }
 
         private void UpdateStaticAttributesIfNeeded(List<string> currentMods, double clockRate)
@@ -2188,6 +2234,13 @@ namespace OsuGrind.LiveReading
                 isLazer: true
             );
 
+            // Calculate BASE (NM) attributes using rosu
+            var nmAttrs = _rosuService.GetDifficultyAttributes(0, 1.0, -1, -1, -1, -1);
+            _baseCS = (float)nmAttrs.CS;
+            _baseAR = (float)nmAttrs.AR;
+            _baseOD = (float)nmAttrs.OD;
+            _baseHP = (float)nmAttrs.HP;
+            _baseStars = _rosuService.GetStars(0, 0, 1.0, -1, -1, -1, -1, isLazer: true);
 
             WriteLogThrottled("calc-stars-result", $"Calculated stars: {_staticStars:F2}");
 
@@ -2208,13 +2261,21 @@ namespace OsuGrind.LiveReading
             if (effectiveBase > 0)
             {
                 _staticBpm = effectiveBase * clockRate;
+                _baseModeBpm = effectiveBase; // Sync base BPM
                 DebugLog($"UpdateStaticAttributes [V2.1.FIX]: Final calculated BPM={_staticBpm:F2} (Base={effectiveBase:F2}, Rate={clockRate:F2})");
             }
             else
             {
                 _staticBpm = rosuBpm;
+                _baseModeBpm = _rosuService.BaseBpm; // Sync from rosu fallback
                 DebugLog($"UpdateStaticAttributes [V2.1.FIX]: Fallback to rosuBpm={rosuBpm}");
             }
+
+            // Update base attributes from rosuNM context
+            _baseCS = (float)_rosuService.CS;
+            _baseAR = (float)_rosuService.AR;
+            _baseOD = (float)_rosuService.OD;
+            _baseHP = (float)_rosuService.HP;
 
             // Update min/max BPM with clock rate
             _minBpm = _baseMinBpm * clockRate;
@@ -2223,7 +2284,44 @@ namespace OsuGrind.LiveReading
             DebugLog($"UpdateStaticAttributes [DA-CHECK]: Mods={string.Join(",", currentMods)} | Stars={_staticStars:F2} | BPM={_staticBpm:F2} | ClockRate={clockRate:F3} | AR={_currentModSettings.AR ?? -1:F1} | CS={_currentModSettings.CS ?? -1:F1} | OD={_currentModSettings.OD ?? -1:F1} | HP={_currentModSettings.HP ?? -1:F1}");
         }
 
+        private string GetLazerFilesPath()
+        {
+            string? customPath = SettingsManager.Current.LazerPath;
+            if (!string.IsNullOrEmpty(customPath) && Directory.Exists(Path.Combine(customPath, "files")))
+            {
+                return Path.Combine(customPath, "files");
+            }
+
+            string roamingPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu");
+            string localPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu");
+            
+            // Check storage.ini for custom path
+            string storageIni = Path.Combine(roamingPath, "storage.ini");
+            if (!File.Exists(storageIni)) storageIni = Path.Combine(localPath, "storage.ini");
+
+            if (File.Exists(storageIni))
+            {
+                try {
+                    var lines = File.ReadAllLines(storageIni);
+                    var fullPathLine = lines.FirstOrDefault(l => l.StartsWith("FullPath =", StringComparison.OrdinalIgnoreCase));
+                    if (fullPathLine != null)
+                    {
+                        var path = fullPathLine.Split('=').Last().Trim();
+                        if (Directory.Exists(Path.Combine(path, "files"))) return Path.Combine(path, "files");
+                    }
+                } catch { }
+            }
+
+            // Fallbacks
+            if (Directory.Exists(Path.Combine(roamingPath, "files"))) return Path.Combine(roamingPath, "files");
+            if (Directory.Exists(Path.Combine(localPath, "files"))) return Path.Combine(localPath, "files");
+            if (Directory.Exists(@"G:\osu-lazer-data\files")) return @"G:\osu-lazer-data\files";
+
+            return Path.Combine(roamingPath, "files"); // Final fallback
+        }
+
         private void UpdateBeatmapFile(IntPtr beatmapInfoPtr)
+
         {
             if (beatmapInfoPtr == IntPtr.Zero) return;
 
@@ -2235,10 +2333,10 @@ namespace OsuGrind.LiveReading
                 if (IsValidHash(hash) && hash != _currentBeatmapHash)
                 {
                     _currentBeatmapHash = hash;
-                    string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                    string lazrFiles = Path.Combine(appData, "osu", "files");
+                    string lazrFiles = GetLazerFilesPath();
 
                     if (hash.Length >= 2)
+
                     {
                         string p = Path.Combine(lazrFiles, hash.Substring(0, 1), hash.Substring(0, 2), hash);
                         if (File.Exists(p))
