@@ -41,19 +41,28 @@ namespace OsuGrind.Services
         {
             _db = new TrackerDb();
 
+            // Use consolidated common detector
+            string? detectedPath = LazerImportService.AutoDetectLazerPath();
             string roamingPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu");
             string localPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu");
             
-            // 1. Primary: LocalAppData/osu (The standard path for modern Lazer)
-            string? storagePath = localPath;
-            if (!Directory.Exists(localPath) || !File.Exists(Path.Combine(localPath, "client.realm")))
+            // Priority: Detected -> Roaming -> Local
+            string? storagePath = detectedPath;
+            if (storagePath == null || !File.Exists(Path.Combine(storagePath, "client.realm")))
             {
-                storagePath = roamingPath;
+                 storagePath = roamingPath;
             }
 
-            // 2. Fallback: Check storage.ini for custom migration paths
+            // Fallback to Local if Roaming is empty/missing
+            if (!File.Exists(Path.Combine(storagePath, "client.realm")) && File.Exists(Path.Combine(localPath, "client.realm")))
+            {
+                storagePath = localPath;
+            }
+
+            // 1. Check storage.ini for custom migration paths (overrides standard if exists)
             string storageIni = Path.Combine(roamingPath, "storage.ini");
             if (!File.Exists(storageIni)) storageIni = Path.Combine(localPath, "storage.ini");
+
 
 
             // Check G: drive fallback found by search

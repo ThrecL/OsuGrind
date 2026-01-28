@@ -7,6 +7,7 @@ using System.Text;
 using OsuGrind.Models;
 using OsuGrind.Services;
 using OsuGrind.Api;
+using OsuGrind.Import;
 
 namespace OsuGrind.LiveReading
 {
@@ -191,14 +192,31 @@ namespace OsuGrind.LiveReading
                             };
                             _cachedStats.Beatmap = $"{_cachedStats.Artist} - {_cachedStats.Title} [{_cachedStats.Version}]";
 
-                            string stablePath = SettingsManager.Current.StablePath ?? "";
+                            string stablePath = "";
+                            
+                            // 1. Process check (highest priority)
+                            try { 
+                                if (_process != null && !_process.HasExited && _process.MainModule != null)
+                                    stablePath = Path.GetDirectoryName(_process.MainModule.FileName) ?? ""; 
+                            } catch { }
+
+                            // 2. Settings check
+                            if (string.IsNullOrEmpty(stablePath) || !Directory.Exists(stablePath))
+                            {
+                                stablePath = SettingsManager.Current.StablePath ?? "";
+                            }
+
+                            // 3. Common detector (Process -> Registry -> Local)
+                            if (string.IsNullOrEmpty(stablePath) || !Directory.Exists(stablePath))
+                            {
+                                stablePath = OsuStableImportService.AutoDetectStablePath() ?? "";
+                            }
+                            
                             if (string.IsNullOrEmpty(stablePath))
                             {
-                                try { 
-                                    if (_process != null && _process.MainModule != null)
-                                        stablePath = Path.GetDirectoryName(_process.MainModule.FileName) ?? ""; 
-                                } catch { }
+                                DebugService.Error("[Stable] Installation path not found. Please set it in Settings.", "StableReader");
                             }
+                            
                             _cachedStats.OsuFolder = stablePath;
 
                             string folder = _scanner.ReadString(_scanner.ReadIntPtr(IntPtr.Add(beatmapPtr, 0x78)));

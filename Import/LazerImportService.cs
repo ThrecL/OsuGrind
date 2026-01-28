@@ -8,8 +8,10 @@ using OsuGrind.Models;
 using Realms;
 using System.Globalization;
 using OsuGrind.Api;
+using System.Diagnostics;
 
 namespace OsuGrind.Services;
+
 
 /// <summary>
 /// Imports scores from osu!lazer's client.realm database using dynamic Realm access.
@@ -61,7 +63,8 @@ public class LazerImportService
         DebugService.Log($"Realm path: {realmPath}", "LazerImportService");
 
         if (!File.Exists(realmPath))
-            return (0, 0, $"Realm file not found: {realmPath}");
+            return (0, 0, $"osu!lazer installation not found. Please open the install location in Settings.");
+
 
         // Copy realm to temp to avoid file locks
         string? tempRealmPath = CopyRealmToTemp(realmPath);
@@ -468,6 +471,43 @@ public class LazerImportService
         return "Unknown";
     }
 
+    public static string? AutoDetectLazerPath()
+    {
+        try
+        {
+            // 1. Check where the app launched from (Process check)
+            var processes = Process.GetProcessesByName("osu").Concat(Process.GetProcessesByName("osu!")).ToList();
+            foreach (var p in processes)
+            {
+                try
+                {
+                    if (!p.HasExited && p.MainModule != null)
+                    {
+                        var pPath = p.MainModule.FileName;
+                        var dir = Path.GetDirectoryName(pPath);
+                        if (string.IsNullOrEmpty(dir)) continue;
+
+                        // Check if client.realm is in the same folder or parent/osu
+                        if (File.Exists(Path.Combine(dir, "client.realm"))) return dir;
+                        var parent = Directory.GetParent(dir);
+                        if (parent != null && File.Exists(Path.Combine(parent.FullName, "client.realm"))) return parent.FullName;
+                    }
+                }
+                catch { }
+            }
+
+            // 2. Normal Installation Location (Roaming/osu)
+            var roamingOsu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu");
+            if (Directory.Exists(roamingOsu) && File.Exists(Path.Combine(roamingOsu, "client.realm"))) return roamingOsu;
+
+            // 3. Fallbacks
+            var localOsu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu");
+            if (Directory.Exists(localOsu) && File.Exists(Path.Combine(localOsu, "client.realm"))) return localOsu;
+        }
+        catch { }
+        return null;
+    }
+
     private string GetRealmPath(string? foldersPath)
     {
         if (!string.IsNullOrWhiteSpace(foldersPath)) {
@@ -479,18 +519,12 @@ public class LazerImportService
             } catch {}
         }
 
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        
-        var candidates = new[] {
-            Path.Combine(localAppData, "osu", "client.realm"),
-            Path.Combine(appData, "osu", "client.realm"),
-            Path.Combine(localAppData, "osu!", "client.realm"),
-            Path.Combine(appData, "osu!", "client.realm")
-        };
-        foreach (var p in candidates) if (File.Exists(p)) return p;
-        return foldersPath ?? candidates[0];
+        string? auto = AutoDetectLazerPath();
+        if (auto != null) return Path.Combine(auto, "client.realm");
+
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu", "client.realm");
     }
+
 
 
     private List<ExtractedScore> ExtractScoresDynamic(RealmConfiguration config, string? targetUsername)

@@ -28,13 +28,13 @@ namespace OsuGrind.Import
         {
             try
             {
-                // 1. SMART CHECK: Is osu! running right now?
+                // 1. Check where the app launched from (Process check)
                 var processes = Process.GetProcessesByName("osu!");
                 foreach (var p in processes)
                 {
                     try
                     {
-                        if (p.MainModule != null)
+                        if (!p.HasExited && p.MainModule != null)
                         {
                             var pPath = p.MainModule.FileName;
                             var dir = Path.GetDirectoryName(pPath);
@@ -44,7 +44,11 @@ namespace OsuGrind.Import
                     catch { }
                 }
 
-                // 2. Check Registry
+                // 2. Normal Installation Locations
+                string localOsu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu!");
+                if (Directory.Exists(localOsu) && File.Exists(Path.Combine(localOsu, "scores.db"))) return localOsu;
+
+                // 3. Check Registry
                 using var key = Registry.CurrentUser.OpenSubKey(@"Software\osu!");
                 if (key != null)
                 {
@@ -52,18 +56,16 @@ namespace OsuGrind.Import
                     if (!string.IsNullOrEmpty(path) && Directory.Exists(path) && File.Exists(Path.Combine(path, "scores.db"))) return path;
                 }
 
-                // 3. Common paths
-                var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                // 4. Other common paths
                 var candidates = new List<string>
                 {
-                    Path.Combine(localAppData, "osu!"),
                     @"C:\osu!",
                     @"D:\osu!",
                     @"E:\osu!",
-                    @"F:\osu!",
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "osu!"),
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "osu!")
                 };
+
 
                 // 4. Proactive search: Check parents of current executable (Portable mode)
                 var currentDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -107,7 +109,8 @@ namespace OsuGrind.Import
             }
 
             if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
-                return (0, 0, "osu! stable path not found. Please locate it in settings.");
+                return (0, 0, "osu!stable installation not found. Please open the install location in Settings.");
+
 
             var scoresDbPath = Path.Combine(path, "scores.db");
             if (!File.Exists(scoresDbPath))
