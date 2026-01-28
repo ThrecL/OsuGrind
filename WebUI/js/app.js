@@ -57,6 +57,13 @@ class OsuGrindApp {
         document.addEventListener('click', () => this.hideCtxMenu());
         document.getElementById('ctxDeletePlay')?.addEventListener('click', () => this.handleCtxDelete());
 
+        // Listen for folder selection from native side
+        window.chrome?.webview?.addEventListener('message', (event) => {
+            if (event.data.type === 'folderSelected') {
+                this.handleFolderSelected(event.data.path, event.data.context);
+            }
+        });
+
         // Initial fetch for top-bar stats
         if (window.analyticsModule) window.analyticsModule.refresh(true);
 
@@ -364,6 +371,26 @@ class OsuGrindApp {
 
     hideCtxMenu() {
         if (this.ctxMenu) this.ctxMenu.style.display = 'none';
+    }
+
+    async handleFolderSelected(path, context) {
+        if (!path) return;
+        console.log(`[App] Folder selected for ${context}: ${path}`);
+        
+        try {
+            const settings = await window.api.getSettings();
+            if (context === 'osu!lazer') {
+                settings.lazerPath = path;
+                await window.api.saveSettings(settings);
+                if (window.settingsModule) await window.settingsModule.importLazer();
+            } else if (context === 'osu!stable') {
+                settings.stablePath = path;
+                await window.api.saveSettings(settings);
+                if (window.settingsModule) await window.settingsModule.importStable();
+            }
+        } catch (e) {
+            console.error('[App] Failed to handle folder selection:', e);
+        }
     }
 
     async handleCtxDelete() {

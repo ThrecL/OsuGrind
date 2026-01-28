@@ -88,9 +88,16 @@ class SettingsModule {
                 if (window.analyticsModule) window.analyticsModule.refresh(true);
                 if (window.historyModule) window.historyModule.refresh();
             } else {
-                alert('Import failed: ' + result.message);
+                if (result.message.includes('not found')) {
+                    if (confirm(`${result.message}\n\nWould you like to manually locate your osu!lazer folder?`)) {
+                        window.chrome.webview.postMessage({ action: 'browseFolder', url: 'osu!lazer' });
+                    }
+                } else {
+                    alert('Import failed: ' + result.message);
+                }
             }
         } catch (error) {
+
             console.error(error);
             alert('Import failed: ' + error.message);
         } finally {
@@ -113,9 +120,16 @@ class SettingsModule {
                 if (window.analyticsModule) window.analyticsModule.refresh(true);
                 if (window.historyModule) window.historyModule.refresh();
             } else {
-                alert('Import failed: ' + result.message);
+                if (result.message.includes('not found')) {
+                    if (confirm(`${result.message}\n\nWould you like to manually locate your osu!stable folder?`)) {
+                        window.chrome.webview.postMessage({ action: 'browseFolder', url: 'osu!stable' });
+                    }
+                } else {
+                    alert('Import failed: ' + result.message);
+                }
             }
         } catch (error) {
+
             console.error(error);
             alert('Import failed: ' + error.message);
         } finally {

@@ -143,6 +143,7 @@ public sealed class LiveSnapshot
     public List<string>? ModsList { get; set; }
 
     public bool IsLazer { get; set; }
+    public bool MapFileFound => !string.IsNullOrEmpty(MapPath) && File.Exists(MapPath);
     public string? ReplayHash { get; set; }
     public string? HitErrorsJson { get; set; }
     public double KeyRatio { get; set; }

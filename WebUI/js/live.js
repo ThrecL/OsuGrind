@@ -169,8 +169,16 @@ class LiveModule {
             count100: document.getElementById('count100'),
             count50: document.getElementById('count50'),
             countMiss: document.getElementById('countMiss'),
-            mapTime: document.getElementById('mapTime')
+            mapTime: document.getElementById('mapTime'),
+            locateBtn: document.getElementById('locateOsuBtn')
         };
+        
+        if (this.elements.locateBtn) {
+            this.elements.locateBtn.onclick = () => {
+                const game = this._lastGameName || 'osu';
+                window.chrome.webview.postMessage({ action: 'browseFolder', url: game.toLowerCase().includes('lazer') ? 'osu!lazer' : 'osu!stable' });
+            };
+        }
     }
 
     initSlots() {
@@ -217,6 +225,15 @@ class LiveModule {
         if (el.mapArtist && el.mapArtist.textContent !== (data.artist || '—')) {
             el.mapArtist.textContent = data.artist || '—';
         }
+
+        this._lastGameName = data.gameName;
+        if (el.locateBtn) {
+            // Show button if game is connected but map file wasn't found
+            const status = data.connectionStatus;
+            const mapFound = data.mapFileFound;
+            el.locateBtn.style.display = (status === 'connected' && !mapFound && data.mapName !== 'Searching...') ? 'block' : 'none';
+        }
+
         if (el.playState && el.playState.textContent !== (data.playState || 'Idle')) {
             el.playState.textContent = data.playState || 'Idle';
         }

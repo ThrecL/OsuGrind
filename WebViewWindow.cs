@@ -291,6 +291,22 @@ public partial class WebViewWindow : Window
         if (_notifyIcon != null) _notifyIcon.Visible = false;
     }
 
+    private void BrowseForFolder(string? title)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = title ?? "Select osu! Folder",
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            string path = dialog.FolderName;
+            var json = JsonSerializer.Serialize(new { type = "folderSelected", path = path, context = title });
+            _webView.CoreWebView2.PostWebMessageAsJson(json);
+        }
+    }
+
     private async void WebViewWindow_Loaded(object sender, RoutedEventArgs e)
 
     {
@@ -393,7 +409,11 @@ public partial class WebViewWindow : Window
                     case "close":
                         Close();
                         break;
+                    case "browseFolder":
+                        BrowseForFolder(message.Url); // Use Url field as title/hint
+                        break;
                     case "openAuth":
+
                         DebugService.Log($"[WebViewWindow] Received openAuth message, URL: {message.Url}");
                         if (!string.IsNullOrEmpty(message.Url))
                         {
@@ -486,8 +506,10 @@ public partial class WebViewWindow : Window
                         maxCombo = snapshot?.MaxCombo ?? 0,
                         mapMaxCombo = snapshot?.MaxCombo ?? 0,
                         totalObjects = snapshot?.TotalObjects ?? 0,
+                        mapFileFound = snapshot?.MapFileFound ?? false,
 
                         backgroundPath = !string.IsNullOrEmpty(snapshot?.BackgroundHash) 
+
                             ? $"/api/background/{snapshot.BackgroundHash}" 
                             : null,
                         mentality = 50 
