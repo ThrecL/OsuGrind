@@ -33,8 +33,6 @@ public class StableScoreDetector
 
     public LiveSnapshot? LastSnapshot { get; private set; }
 
-    private static DateTime _lastGoalSoundDate = DateTime.MinValue;
-
     public StableScoreDetector(TrackerDb db, SoundPlayer soundPlayer, ApiServer api)
     {
         _db = db;
@@ -277,20 +275,6 @@ public class StableScoreDetector
         return true;
     }
 
-    private bool IsGoalMet(TrackerDb.GoalProgress p)
-    {
-        int targetPlays = SettingsManager.Current.GoalPlays;
-        int targetHits = SettingsManager.Current.GoalHits;
-        double targetStars = SettingsManager.Current.GoalStars;
-        int targetPP = SettingsManager.Current.GoalPP;
-
-        if (targetPlays > 0 && p.Plays < targetPlays) return false;
-        if (targetHits > 0 && p.Hits < targetHits) return false;
-        if (targetStars > 0 && p.StarPlays < 1) return false;
-        if (targetPP > 0 && p.TotalPP < targetPP) return false;
-        return true;
-    }
-
     private void RecordPlay(LiveSnapshot s, bool isPass)
     {
         if (_hasRecordedCurrentPlay) return;
@@ -427,18 +411,7 @@ public class StableScoreDetector
                 await _db.InsertPlayAsync(row);
                 await _api.BroadcastRefresh();
 
-                _ = Task.Run(async () => {
-                    if (!SettingsManager.Current.GoalSoundEnabled) return;
-                    if (_lastGoalSoundDate.Date == DateTime.Today) return;
-
-                    await Task.Delay(5000);
-                    var progress = await _db.GetTodayGoalProgressAsync(SettingsManager.Current.GoalStars);
-                    if (IsGoalMet(progress)) {
-                        _lastGoalSoundDate = DateTime.Today;
-                        DebugService.Log("[StableDetector] Goals completed! Playing streak.ogg", "Detector");
-                        _soundPlayer.PlayStreak();
-                    }
-                });
+                _ = GoalManager.CheckAndPlayGoalSound(_db, _soundPlayer);
             }
             catch (Exception ex) { DebugService.Error($"[StableDetector] DB Error: {ex.Message}", "Detector"); }
         });

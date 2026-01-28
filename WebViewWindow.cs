@@ -298,8 +298,12 @@ public partial class WebViewWindow : Window
         {
             // Initialize database
             await _db.MigrateAsync();
+
+            // Initialize Goal state (prevents playing sound if already met)
+            try { await GoalManager.InitializeAsync(_db); } catch { }
             
             // Start API server
+
             _apiServer.Start();
 
             // Initialize WebView2
