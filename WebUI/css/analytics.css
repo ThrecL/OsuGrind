@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    ANALYTICS TAB Styles
-═══════════════════════════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 @keyframes statCardIn {
     from {
@@ -82,11 +82,15 @@
     text-transform: uppercase;
 }
 
-.form-value.peak { color: #f2fe00; text-shadow: 0 0 10px rgba(242, 254, 0, 0.5); }
+/* Form & Perf Rating Colors (Matched to website) */
+.perf-label.neon-green { color: #00ff88 !important; }
+.form-value.peak, .perf-value.peak { color: #f2fe00; text-shadow: 0 0 10px rgba(242, 254, 0, 0.5); }
+.form-value.great, .perf-value.great { color: #00ff88; }
 .form-value.improving { color: #00f2fe; text-shadow: 0 0 10px rgba(0, 242, 254, 0.5); }
-.form-value.stable { color: #fff; }
+.form-value.stable, .perf-value.stable { color: #ffffff; }
 .form-value.fatigued { color: #ffae00; }
-.form-value.slumping { color: #ff4d4d; }
+.form-value.slumping, .perf-value.slumping { color: #ffae00; }
+.form-value.burnout, .perf-value.burnout { color: #ff5566; }
 
 .skill-insights {
     display: flex;

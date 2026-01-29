@@ -33,11 +33,11 @@ namespace OsuGrind.LiveReading
             
             _lazerReader.OnPlayRecorded += (success) => {
                 OnPlayRecorded?.Invoke(success);
-                if (success) TrackerService.TriggerSync();
+                if (success) TrackerService.OnPlayFinished();
             };
             _stableReader.OnPlayRecorded += (success) => {
                 OnPlayRecorded?.Invoke(success);
-                if (success) TrackerService.TriggerSync();
+                if (success) TrackerService.OnPlayFinished();
             };
         }
 

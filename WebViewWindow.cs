@@ -528,12 +528,13 @@ public partial class WebViewWindow : Window
                 bool isResults = snapshot?.StateNumber == 7;
                 int tickDelay = (isPlaying || isResults) ? 16 : 66; // 60Hz during action, 15Hz idle
 
-                await Task.Delay(tickDelay); // Dynamic frequency
+                await Task.Delay(tickDelay, _cts.Token); // Dynamic frequency
             }
+            catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
                 Console.WriteLine($"[GameLoop] Error: {ex.Message}");
-                await Task.Delay(1000);
+                try { await Task.Delay(1000, _cts.Token); } catch { break; }
             }
         }
     }
@@ -541,17 +542,40 @@ public partial class WebViewWindow : Window
 
 
 
-    private void WebViewWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    private async void WebViewWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        // Cancel the actual close so we can hide and sync
+        e.Cancel = true;
+        
+        // Visually hide immediately
+        Hide();
+
         _cts.Cancel();
         try { 
-            if (_gameLoopTask != null) _gameLoopTask.Wait(TimeSpan.FromMilliseconds(100)); 
+            if (_gameLoopTask != null) 
+            {
+                // Wait for game loop to finish, but with a timeout
+                var timeoutTask = Task.Delay(500);
+                if (await Task.WhenAny(_gameLoopTask, timeoutTask) == timeoutTask)
+                {
+                    DebugService.Log("[WebViewWindow] GameLoop did not exit cleanly in time", "Shutdown");
+                }
+            }
         } catch { }
+        
         try { _apiServer.Stop(); } catch { }
         try { _osuReader.Dispose(); } catch { }
         try { _webView.Dispose(); } catch { } 
         try { _notifyIcon?.Dispose(); } catch { }
         
+        try 
+        { 
+            // Final sync with 5s timeout
+            var syncTask = TrackerService.StopAsync(); 
+            var timeoutTask = Task.Delay(5000);
+            await Task.WhenAny(syncTask, timeoutTask);
+        } catch { }
+
         // Final aggressive termination to prevent lingering threads
         System.Windows.Application.Current.Shutdown();
     }

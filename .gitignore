@@ -1,3 +1,17 @@
+# Secrets & Config
+secrets.json
+tracker_metadata.json
+worker.js
+metadata.json
+debug_worker.js
+.env
+wrangler.toml
+website/
+osugrind.sqlite
+*.realm
+*.realm.lock
+*.realm.management
+
 # .NET
 bin/
 obj/
@@ -16,22 +30,12 @@ build_errors.txt
 *.db-shm
 *.db-wal
 
-# Secrets & Config
-secrets.json
-index.js
-tracker_metadata.json
-worker.js
-metadata.json
-debug_worker.js
-.env
-wrangler.toml
-website/
-
-
 # Logs & Temp
 score_debug.txt
 *.log
 *.txt
+console_output.log
+api_server_error.txt
 temp/
 
 # Scripts

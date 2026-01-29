@@ -82,7 +82,10 @@ class AnalyticsModule {
 
         // Performance & Form
         const perfMatchEl = document.getElementById('perfMatch');
-        if (perfMatchEl) perfMatchEl.textContent = `${(data.perfMatch || 0).toFixed(1)}%`;
+        if (perfMatchEl) {
+            perfMatchEl.textContent = `${(data.perfMatch || 0).toFixed(1)}%`;
+            perfMatchEl.className = 'perf-value match'; // Revert to standard match class
+        }
 
         const formEl = document.getElementById('currentForm');
         if (formEl) {
@@ -141,16 +144,6 @@ class AnalyticsModule {
                     data: dailyData.map(d => d.avgPP),
                     borderColor: '#BB88FF',
                     backgroundColor: 'rgba(187, 136, 255, 0.1)',
-                    fill: true,
-                    tension: 0.4
-                });
-                break;
-            case 'performance':
-                datasets.push({
-                    label: 'Performance Match (%)',
-                    data: this.rawData.dailyPerformance.map(d => d.match),
-                    borderColor: '#FF66AB',
-                    backgroundColor: 'rgba(255, 102, 171, 0.1)',
                     fill: true,
                     tension: 0.4
                 });
@@ -234,9 +227,16 @@ class AnalyticsModule {
                 datasets.push({
                     label: 'Hits',
                     data: hLabels.map(l => bins[l]),
-                    backgroundColor: hLabels.map(l => Math.abs(l) < 20 ? '#00FF88' : (Math.abs(l) < 40 ? '#FFD700' : '#FF3C78')),
+                    backgroundColor: hLabels.map(l => {
+                        const abs = Math.abs(l);
+                        if (abs <= 20) return '#66ccff'; // blue
+                        if (abs <= 60) return '#00ff88'; // green
+                        if (abs <= 100) return '#ffcc00'; // yellow
+                        return '#ff5566'; // red
+                    }),
                     barPercentage: 1,
-                    categoryPercentage: 1
+                    categoryPercentage: 1,
+                    borderRadius: 0
                 });
                 options.plugins.legend.display = false;
                 options.scales.x.title = { display: true, text: 'Offset (ms)', color: '#666' };

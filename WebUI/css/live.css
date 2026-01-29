@@ -165,6 +165,11 @@
     50% { transform: scale(1.05); filter: brightness(1.2); }
 }
 
+@keyframes whitePulse {
+    0%, 100% { transform: scale(1); filter: brightness(1) drop-shadow(0 0 10px rgba(255,255,255,0.4)); }
+    50% { transform: scale(1.03); filter: brightness(1.8) drop-shadow(0 0 20px rgba(255,255,255,0.8)); }
+}
+
 @keyframes rainbowShift {
     0% { filter: hue-rotate(0deg); }
     100% { filter: hue-rotate(360deg); }
@@ -199,7 +204,8 @@
 }
 
 .pp-side .side-value.rank-top3 {
-    filter: drop-shadow(0 0 30px rgba(255, 255, 255, 0.9));
+    animation: whitePulse 1s ease-in-out infinite;
+    z-index: 50;
 }
 
 .pp-side .side-value.rank-top2 {
@@ -233,7 +239,7 @@
     .rank-top15 .digit-strip span { background: linear-gradient(135deg, #4D96FF, #0044FF, #4D96FF); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: ppDiamond 1.8s ease infinite; }
     .rank-top10 .digit-strip span { background: linear-gradient(135deg, #E0F7FA, #00E5FF, #E0F7FA); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: ppDiamond 1.5s ease infinite; }
     .rank-top5 .digit-strip span { background: linear-gradient(135deg, #FF4D4D, #B71C1C, #FF4D4D); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: ppDiamond 1s ease infinite; }
-    .rank-top3 .digit-strip span { background: linear-gradient(135deg, #ffffff, #b0b0b0, #ffffff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: ppDiamond 0.8s ease infinite; }
+    .rank-top3 .digit-strip span { background: #ffffff; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
     .rank-top2 .digit-strip span { background: linear-gradient(135deg, #FF6B6B, #FFD93D, #6BCF7F, #4D96FF, #9B59B6, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: rainbowShift 3s linear infinite; }
     .rank-top1 .digit-strip span { background: linear-gradient(135deg, #FF0080, #FF8C00, #FFD700, #00FF00, #00FFFF, #0080FF, #8000FF, #FF0080); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: rainbowShift 2s linear infinite; }
 }

@@ -1,59 +1,63 @@
-# OsuGrind Analytics Formulas
+# OsuGrind Analytics Formulas (v1.0.1)
 
 This document outlines the mathematical models used by OsuGrind to track your performance, consistency, and mental state.
 
-## 1. Mentality Score (0–100)
-The Mentality score is a reactive indicator of your focus and session quality. It is calculated strictly using data from the **last 3 days**.
+## 1. Mentality Score (0–100) - Hard Mode
+The Mentality score is a reactive indicator of your focus and session quality. It is calculated strictly using data from the **last 3 days**. The v1.0.1 "Hard Mode" update prioritizes deep focus and consistency over raw play count.
 
 ### Base Score
 The base score is weighted as follows:
-- **Pass Rate (50%)**: `(PassCount / TotalPlays) * 50`
-- **Accuracy (40%)**: `AverageAccuracy * 40`
-- **Density (10%)**: `Math.Min(1.0, TotalPlays / (HoursPlayed * 10 + 1))`
+- **Resilience (20%)**: `(PassCount / TotalPlays) * 100`. Measures your ability to finish what you start.
+- **Focus (40%)**: `Math.Clamp((AvgDurationMs / 180000.0) * 100, 0, 100)`. The "Gold Standard" for focus is now **3 minutes** per play. Short retries heavily penalize this score.
+- **Skill Alignment (40%)**: `(CurrentAvgPP / ReferencePeakPP) * 100`. Measures how consistently you are playing near your top-tier skill level.
 
 ### Penalties & Multipliers
-The base score is then subjected to dynamic multipliers:
+The base score is then subjected to dynamic environmental factors:
+
+#### UR Penalty (Consistency)
+Poor timing consistency suggests mental fatigue or tilt.
+- **UR > 120**: 0.8x Multiplier
+- **UR > 90**: 0.9x Multiplier
 
 #### Inactivity Decay
-Mentality begins to decline if you don't play.
+Mentality declines if you stop training.
 - **Starts after**: 12 hours of inactivity.
-- **Rate**: -10% per day.
-- **Formula**: `multiplier = 0.9 ^ (InactivityDays - 0.5)`
+- **Rate**: -8% per day.
+- **Formula**: `multiplier = 0.92 ^ (InactivityDays - 0.5)`
 
-#### Performance Penalty
-If your recent performance is significantly lower than your historical peak, Mentality takes a hit.
-- **85% of Peak**: 0.8x Multiplier
-- **70% of Peak**: 0.5x Multiplier (Massive Hit)
-- **50% of Peak**: 0.2x Multiplier (Critical Hit)
+#### Fatigue Penalty
+Overtraining leads to diminishing returns and tilt.
+- **> 3 Hours Played (Recent)**: 0.85x Multiplier
+- **> 6 Hours Played (Recent)**: 0.60x Multiplier
 
-#### Goal Penalty
-If daily goals are enabled and you are behind schedule (after 12:00 PM local time).
-- **Formula**: `0.6x Multiplier` if current progress is less than 70% of the expected progress for the current hour.
+#### Goal Progress Bonus
+- **Ahead of Schedule**: 1.05x Bonus if you are beating your hourly target.
+- **Behind Schedule**: 0.70x Penalty if you are significantly behind after 2:00 PM.
 
 ---
 
-## 2. Peak Performance Match
-Measures how your current session (or selected period) compares to your all-time potential.
+## 2. Peak Performance Match (Composite Rating)
+Unlike a standard PP tracker, this metric measures your **overall skill execution** relative to your peak.
 
-- **Formula**: `(Average_PP_of_Period / Reference_PP) * 100`
-- **Reference_PP**: The highest daily average PP recorded in your OsuGrind history.
+- **Formula**: `(PP_Factor * 0.6) + (Acc_Factor * 0.3) + (Consistency_Factor * 0.1)`
+- **PP Factor**: Current Avg PP / Average of your **Top 5 Best Days**.
+- **Acc Factor**: Current Avg Accuracy / Average Accuracy of your Top 5 Days.
+- **Consistency Factor**: Target UR (Best 5 days) / Current UR (capped at 1.2x).
+
+This ensures that a "high PP" day with terrible accuracy or shaky UR results in a lower Performance Match % than a clean, consistent session.
 
 ---
 
 ## 3. Current Form
-A trend indicator comparing short-term performance against long-term consistency.
+A trend indicator comparing your performance over the last **14 days** against your **90-day baseline**.
 
-- **Short-term Window**: 14 Days
-- **Long-term Baseline**: 90 Days
-- **Formula**: `(14d_Avg_PP / 90d_Avg_PP)`
-
-| Ratio | Form State |
-|-------|------------|
-| > 1.10 | **Peak** |
-| > 1.03 | **Improving** |
-| 0.96 – 1.03 | **Stable** |
-| < 0.96 | **Slumping** |
-| < 0.90 | **Burnout** |
+| Ratio | Form State | Description |
+|-------|------------|-------------|
+| > 1.05 | **PEAK** | Playing at your absolute highest potential. |
+| > 0.96 | **GREAT** | Elite consistency and near-peak performance. |
+| 0.88 – 0.96 | **STABLE** | Your reliable baseline skill level. |
+| 0.75 – 0.88 | **SLUMPING** | Noticeable drop in performance; potential tilt. |
+| < 0.75 | **BURNOUT** | Significant loss of skill/focus; rest is recommended. |
 
 ---
 
@@ -61,4 +65,4 @@ A trend indicator comparing short-term performance against long-term consistency
 Calculated based on hit offsets from memory (Live) or replay (Analysis).
 
 - **Formula**: `StandardDeviation(HitOffsets) * 10`
-- **Note**: For speed-modifying mods (DT/HT), the offsets are normalized by the clock rate to ensure accurate comparisons.
+- **Normalization**: For speed-modifying mods (DT/HT), offsets are normalized by the clock rate to ensure accurate skill comparisons across different speeds.

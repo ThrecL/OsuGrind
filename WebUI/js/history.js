@@ -426,7 +426,8 @@ class HistoryModule {
         this.currentReplayContext = {
             scoreId: score.id,
             beatmapHash: score.beatmapHash || '',
-            mods: modList
+            mods: modList,
+            rank: grade
         };
         console.log('[History] Set replay context:', this.currentReplayContext);
 
@@ -584,6 +585,13 @@ class HistoryModule {
                 if (bar) bar.style.width = `${percent}%`;
                 if (labelEl && label) labelEl.textContent = label;
             };
+
+            if (this.currentReplayContext?.rank === 'F') {
+                updateProgress(0, 'Failed scores have no replay');
+                const bar = rewindContainer.querySelector('.rewind-progress');
+                if (bar) bar.style.display = 'none';
+                return;
+            }
 
             updateProgress(30, 'Requesting replay data...');
             const info = await window.api.getRewindInfo(id);

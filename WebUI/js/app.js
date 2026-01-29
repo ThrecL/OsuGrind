@@ -196,7 +196,7 @@ class OsuGrindApp {
 
         this.checkForUpdates();
 
-        console.log('[App] OsuGrind v1.0.0 initialized');
+        console.log('[App] OsuGrind v1.0.1 initialized');
     }
 
     async checkForUpdates() {

@@ -466,39 +466,91 @@ public class ApiServer : IDisposable
     }
 
     private async Task<object> GetAnalyticsDataAsync(int days) {
-        var summary = await _db.GetAnalyticsSummaryAsync(days); 
+        var summary = await _db.GetAnalyticsSummaryAsync(days); // Stats for the selected period
+        var allTimeSummary = await _db.GetAnalyticsSummaryAsync(0); // For all-time Peak Perf
         var daily = (days == -1) ? await _db.GetHourlyStatsTodayAsync() : await _db.GetDailyStatsAsync(days);
         var playsToday = await _db.GetPlaysTodayCountAsync(); 
         var streak = await _db.GetPlayStreakAsync();
         
+        // Improved Peak Performance Reference Baselines
         var allDaily = await _db.GetDailyStatsAsync(0); 
-        double referencePP = allDaily.Any() ? allDaily.Max(d => d.AvgPP) : 1; 
+        double referencePP = 1;
+        double referenceAcc = 0.95;
+        double targetUR = 80.0;
+
+        if (allDaily.Count > 0)
+        {
+            var topDays = allDaily.OrderByDescending(d => d.AvgPP).Take(5).ToList();
+            referencePP = topDays.Average(d => d.AvgPP);
+            referenceAcc = topDays.Average(d => d.AvgAcc);
+            targetUR = allDaily.Where(d => d.AvgUR > 40).OrderBy(d => d.AvgUR).Take(5).DefaultIfEmpty(new DailyStats { AvgUR = 100 }).Average(d => d.AvgUR);
+        }
         if (referencePP <= 0) referencePP = 1;
         
         var recentSummary = await _db.GetAnalyticsSummaryAsync(14); 
         double currentRatio = referencePP > 0 ? recentSummary.AvgPP / referencePP : 0;
         string form = "Stable";
-        if (recentSummary.TotalPlays > 0) { if (currentRatio > 1.05) form = "Peak"; else if (currentRatio > 0.95) form = "Great"; else if (currentRatio > 0.85) form = "Stable"; else if (currentRatio > 0.70) form = "Slumping"; else form = "Burnout"; }
-
-        var mentalitySummary = await _db.GetAnalyticsSummaryAsync(3);
-        double mentality = 0; 
-        if (mentalitySummary.TotalPlays > 0) {
-            double passRate = (double)mentalitySummary.PassCount / mentalitySummary.TotalPlays;
-            double accFactor = mentalitySummary.AvgAccuracy;
-            double hoursPlayed = mentalitySummary.TotalDurationMs / 3600000.0;
-            double density = Math.Min(1.0, mentalitySummary.TotalPlays / (hoursPlayed * 10 + 1));
-            double baseScore = (passRate * 50.0) + (accFactor * 40.0) + (density * 10.0);
-            double multiplier = 1.0;
-            if (mentalitySummary.LastPlayedUtc.HasValue) { var lastPlayed = mentalitySummary.LastPlayedUtc.Value.ToLocalTime(); var inactivityDays = (DateTime.Now - lastPlayed).TotalDays; multiplier = Math.Pow(0.9, Math.Max(0, inactivityDays - 0.5)); }
-            double currentPerfMatch = mentalitySummary.AvgPP / referencePP;
-            double perfPenalty = 1.0; if (currentPerfMatch < 0.85) perfPenalty = 0.8; if (currentPerfMatch < 0.70) perfPenalty = 0.5; if (currentPerfMatch < 0.50) perfPenalty = 0.2;
-            double goalPenalty = 1.0; var goals = await _db.GetTodayGoalProgressAsync(SettingsManager.Current.GoalStars);
-            bool hasAnyGoals = SettingsManager.Current.GoalPlays > 0 || SettingsManager.Current.GoalHits > 0 || SettingsManager.Current.GoalPP > 0;
-            if (hasAnyGoals) { double hour = DateTime.Now.Hour; if (hour > 12) { double targetProgress = Math.Clamp((hour - 12) / 10.0, 0, 1.0); double actualProgress = 0; int goalCount = 0; if (SettingsManager.Current.GoalPlays > 0) { actualProgress += Math.Min(1.0, (double)goals.Plays / SettingsManager.Current.GoalPlays); goalCount++; } if (SettingsManager.Current.GoalHits > 0) { actualProgress += Math.Min(1.0, (double)goals.Hits / SettingsManager.Current.GoalHits); goalCount++; } if (SettingsManager.Current.GoalPP > 0) { actualProgress += Math.Min(1.0, goals.TotalPP / SettingsManager.Current.GoalPP); goalCount++; } double avgProgress = actualProgress / goalCount; if (avgProgress < targetProgress * 0.7) goalPenalty = 0.6; } }
-            mentality = baseScore * multiplier * perfPenalty * goalPenalty;
+        if (recentSummary.TotalPlays > 0) 
+        { 
+            if (currentRatio > 1.05) form = "Peak"; 
+            else if (currentRatio > 0.96) form = "Great"; 
+            else if (currentRatio > 0.88) form = "Stable"; 
+            else if (currentRatio > 0.75) form = "Slumping"; 
+            else form = "Burnout"; 
         }
 
-        var dailyPerformance = daily.Select(d => new { date = d.Date, match = referencePP > 0 ? Math.Round((d.AvgPP / referencePP) * 100.0, 1) : 0 }).ToList();
+        var mentalitySummary = await _db.GetAnalyticsSummaryAsync(3);
+        double mentality = 75; 
+        if (mentalitySummary.TotalPlays > 0) 
+        {
+            double passRate = (double)mentalitySummary.PassCount / mentalitySummary.TotalPlays;
+            double resilienceScore = passRate * 100;
+            double avgDuration = (double)mentalitySummary.TotalDurationMs / mentalitySummary.TotalPlays;
+            double focusScore = Math.Clamp((avgDuration / 180000.0) * 100, 0, 100);
+            double currentPerfMatch = mentalitySummary.AvgPP / referencePP;
+            double consistencyScore = Math.Clamp(currentPerfMatch * 100, 0, 100);
+            double baseScore = (resilienceScore * 0.2) + (focusScore * 0.4) + (consistencyScore * 0.4);
+            double urPenalty = 1.0;
+            if (mentalitySummary.AvgUR > 120) urPenalty = 0.8;
+            else if (mentalitySummary.AvgUR > 90) urPenalty = 0.9;
+            double multiplier = 1.0;
+            if (mentalitySummary.LastPlayedUtc.HasValue) 
+            { 
+                var lastPlayed = mentalitySummary.LastPlayedUtc.Value.ToLocalTime(); 
+                var inactivityDays = (DateTime.Now - lastPlayed).TotalDays; 
+                multiplier = Math.Pow(0.92, Math.Max(0, inactivityDays - 0.5)); 
+            }
+            double hoursPlayedRecent = mentalitySummary.TotalDurationMs / 3600000.0;
+            double fatiguePenalty = 1.0;
+            if (hoursPlayedRecent > 3.0) fatiguePenalty = 0.85;
+            if (hoursPlayedRecent > 6.0) fatiguePenalty = 0.60;
+            var goals = await _db.GetTodayGoalProgressAsync(SettingsManager.Current.GoalStars);
+            double goalMod = 1.0;
+            bool hasAnyGoals = SettingsManager.Current.GoalPlays > 0 || SettingsManager.Current.GoalHits > 0 || SettingsManager.Current.GoalPP > 0;
+            if (hasAnyGoals) 
+            { 
+                double hour = DateTime.Now.Hour; 
+                if (hour > 12) 
+                { 
+                    double targetProgress = Math.Clamp((hour - 12) / 10.0, 0, 1.0); 
+                    double actualProgress = 0; 
+                    int goalCount = 0; 
+                    if (SettingsManager.Current.GoalPlays > 0) { actualProgress += Math.Min(1.0, (double)goals.Plays / SettingsManager.Current.GoalPlays); goalCount++; } 
+                    if (SettingsManager.Current.GoalHits > 0) { actualProgress += Math.Min(1.0, (double)goals.Hits / SettingsManager.Current.GoalHits); goalCount++; } 
+                    if (SettingsManager.Current.GoalPP > 0) { actualProgress += Math.Min(1.0, goals.TotalPP / SettingsManager.Current.GoalPP); goalCount++; } 
+                    double avgProgress = actualProgress / goalCount; 
+                    if (avgProgress > targetProgress) goalMod = 1.05;
+                    else if (avgProgress < targetProgress * 0.4) goalMod = 0.7; 
+                } 
+            }
+            mentality = baseScore * multiplier * fatiguePenalty * goalMod * urPenalty;
+        }
+
+        // Calculate All-Time Composite Performance Match for the main card
+        double allTimePPFactor = referencePP > 0 ? (allTimeSummary.AvgPP / referencePP) : 0;
+        double allTimeAccFactor = referenceAcc > 0 ? (allTimeSummary.AvgAccuracy / referenceAcc) : 0;
+        double allTimeURFactor = allTimeSummary.AvgUR > 0 ? (targetUR / allTimeSummary.AvgUR) : 0;
+        double allTimePerfMatch = (allTimePPFactor * 0.6) + (allTimeAccFactor * 0.3) + (Math.Min(1.2, allTimeURFactor) * 0.1);
 
         return new { 
             totalPlays = summary.TotalPlays, 
@@ -509,11 +561,10 @@ public class ApiServer : IDisposable
             avgKeyRatio = summary.AvgKeyRatio, 
             playsToday, 
             streak, 
-            perfMatch = referencePP > 0 ? (summary.AvgPP / referencePP) * 100.0 : 0, 
+            perfMatch = Math.Round(allTimePerfMatch * 100.0, 1), 
             currentForm = form, 
             mentality = Math.Clamp(mentality, 0, 100), 
             dailyActivity = daily.Select(d => new { date = d.Date, plays = d.PlayCount, minutes = d.TotalDurationMs / 60000.0, avgPP = d.AvgPP, avgAcc = d.AvgAcc * 100.0, avgUR = d.AvgUR, avgKeyRatio = d.AvgKeyRatio }), 
-            dailyPerformance, 
             hitErrors = await GetRecentHitErrorsAsync(days) 
         };
     }
