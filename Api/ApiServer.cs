@@ -79,7 +79,17 @@ public class ApiServer : IDisposable
         }
     }
 
-    private async Task ListenLoop() { while (!_cts.IsCancellationRequested) { try { var context = await _listener.GetContextAsync(); _ = Task.Run(() => HandleRequest(context)); } catch (HttpListenerException) when (_cts.IsCancellationRequested) { break; } catch (Exception ex) { Console.WriteLine($"[ApiServer] Listen error: {ex.Message}"); } } }
+    private async Task ListenLoop() { 
+        while (!_cts.IsCancellationRequested) { 
+            try { 
+                var context = await _listener.GetContextAsync(); 
+                _ = Task.Run(() => HandleRequest(context)); 
+            } 
+            catch (HttpListenerException) when (_cts.IsCancellationRequested) { break; }
+            catch (ObjectDisposedException) { break; } 
+            catch (Exception ex) { Console.WriteLine($"[ApiServer] Listen error: {ex.Message}"); } 
+        } 
+    }
 
     private async Task HandleRequest(HttpListenerContext context)
     {
@@ -123,7 +133,13 @@ public class ApiServer : IDisposable
                 break;
             }
             case "/api/debug/dump": await SendJson(response, await _db.DumpPlaysAsync()); break;
-            case "/api/analytics": await SendJson(response, await GetAnalyticsDataAsync(GetQueryInt(context, "days", 30))); break;
+            case "/api/analytics": 
+            {
+                var daysStr = context.Request.QueryString["days"];
+                int days = daysStr == "today" ? -1 : GetQueryInt(context, "days", 30);
+                await SendJson(response, await GetAnalyticsDataAsync(days)); 
+                break;
+            }
             case "/api/goals":
             {
                 var progress = await _db.GetTodayGoalProgressAsync(SettingsManager.Current.GoalStars);
@@ -151,6 +167,7 @@ public class ApiServer : IDisposable
                     if (error != null) await SendJson(response, new { success = false, message = error }, 400); 
                     else { 
                         try { await _db.MigrateAsync(); } catch { }
+                        TrackerService.TriggerSync();
                         await BroadcastRefresh(); 
                         await SendJson(response, new { success = true, count = added, skipped }); 
                     } 
@@ -164,6 +181,7 @@ public class ApiServer : IDisposable
                     if (!string.IsNullOrEmpty(error)) await SendJson(response, new { success = false, message = error }, 400); 
                     else { 
                         try { await _db.MigrateAsync(); } catch { }
+                        TrackerService.TriggerSync();
                         await BroadcastRefresh(); 
                         await SendJson(response, new { success = true, count = added, skipped }); 
                     } 
@@ -199,9 +217,40 @@ public class ApiServer : IDisposable
                 if (!string.IsNullOrEmpty(profileToken)) {
                     var profile = await _authService.GetUserProfileAsync(profileToken);
                     if (profile != null) { 
-                        var p = profile.Value; double pp = 0; double acc = 0; int gr = 0; int cr = 0;
-                        if (p.TryGetProperty("statistics", out var s)) { pp = s.GetProperty("pp").GetDouble(); acc = s.GetProperty("hit_accuracy").GetDouble(); gr = s.GetProperty("global_rank").ValueKind != JsonValueKind.Null ? s.GetProperty("global_rank").GetInt32() : 0; cr = s.GetProperty("country_rank").ValueKind != JsonValueKind.Null ? s.GetProperty("country_rank").GetInt32() : 0; }
-                        await SendJson(response, new { isLoggedIn = true, username = p.GetProperty("username").GetString(), avatarUrl = p.GetProperty("avatar_url").GetString(), globalRank = gr, countryRank = cr, pp, accuracy = acc }); return;
+                        var p = profile.Value; 
+                        double pp = 0; double acc = 0; int gr = 0; int cr = 0; int playCount = 0; double maxCombo = 0; string coverUrl = "";
+                        
+                        if (p.TryGetProperty("statistics", out var s)) { 
+                            if (s.TryGetProperty("pp", out var ppProp)) pp = ppProp.GetDouble(); 
+                            if (s.TryGetProperty("hit_accuracy", out var accProp)) acc = accProp.GetDouble(); 
+                            if (s.TryGetProperty("global_rank", out var grProp) && grProp.ValueKind != JsonValueKind.Null) gr = grProp.GetInt32(); 
+                            if (s.TryGetProperty("country_rank", out var crProp) && crProp.ValueKind != JsonValueKind.Null) cr = crProp.GetInt32();
+                            if (s.TryGetProperty("play_count", out var pcProp)) playCount = pcProp.GetInt32();
+                            if (s.TryGetProperty("maximum_combo", out var mcProp)) maxCombo = mcProp.GetInt32();
+                        }
+                        if (p.TryGetProperty("cover_url", out var coverProp)) coverUrl = coverProp.GetString() ?? "";
+                        else if (p.TryGetProperty("cover", out var coverObj) && coverObj.TryGetProperty("url", out var urlProp)) coverUrl = urlProp.GetString() ?? "";
+                        
+                        // Persist username to settings for tracking
+                        var username = p.GetProperty("username").GetString();
+                        if (SettingsManager.Current.Username != username) {
+                            SettingsManager.Current.Username = username;
+                            SettingsManager.Save();
+                        }
+
+                        await SendJson(response, new { 
+                            isLoggedIn = true, 
+                            username = p.GetProperty("username").GetString(), 
+                            avatarUrl = p.GetProperty("avatar_url").GetString(), 
+                            globalRank = gr, 
+                            countryRank = cr, 
+                            pp, 
+                            accuracy = acc,
+                            playCount,
+                            maxCombo,
+                            coverUrl
+                        }); 
+                        return;
                     }
                 }
                 await SendJson(response, new { isLoggedIn = false });
@@ -417,9 +466,14 @@ public class ApiServer : IDisposable
     }
 
     private async Task<object> GetAnalyticsDataAsync(int days) {
-        var summary = await _db.GetAnalyticsSummaryAsync(days); var daily = (days == -1) ? await _db.GetHourlyStatsTodayAsync() : await _db.GetDailyStatsAsync(days);
-        var playsToday = await _db.GetPlaysTodayCountAsync(); var streak = await _db.GetPlayStreakAsync();
-        var allDaily = await _db.GetDailyStatsAsync(0); double referencePP = allDaily.Any() ? allDaily.Max(d => d.AvgPP) : 1; if (referencePP <= 0) referencePP = 1;
+        var summary = await _db.GetAnalyticsSummaryAsync(days); 
+        var daily = (days == -1) ? await _db.GetHourlyStatsTodayAsync() : await _db.GetDailyStatsAsync(days);
+        var playsToday = await _db.GetPlaysTodayCountAsync(); 
+        var streak = await _db.GetPlayStreakAsync();
+        
+        var allDaily = await _db.GetDailyStatsAsync(0); 
+        double referencePP = allDaily.Any() ? allDaily.Max(d => d.AvgPP) : 1; 
+        if (referencePP <= 0) referencePP = 1;
         
         var recentSummary = await _db.GetAnalyticsSummaryAsync(14); 
         double currentRatio = referencePP > 0 ? recentSummary.AvgPP / referencePP : 0;
@@ -444,7 +498,24 @@ public class ApiServer : IDisposable
             mentality = baseScore * multiplier * perfPenalty * goalPenalty;
         }
 
-        return new { totalPlays = summary.TotalPlays, totalMinutes = summary.TotalDurationMs / 60000.0, avgAccuracy = summary.AvgAccuracy, avgPP = summary.AvgPP, avgUR = summary.AvgUR, avgKeyRatio = summary.AvgKeyRatio, playsToday, streak, perfMatch = summary.TotalPlays > 0 ? (summary.AvgPP / referencePP) * 100.0 : 0, currentForm = form, mentality = Math.Clamp(mentality, 0, 100), dailyActivity = daily.Select(d => new { date = d.Date, plays = d.PlayCount, minutes = d.TotalDurationMs / 60000.0, avgPP = d.AvgPP, avgAcc = d.AvgAcc * 100.0, avgUR = d.AvgUR, avgKeyRatio = d.AvgKeyRatio }), hitErrors = await GetRecentHitErrorsAsync(days) };
+        var dailyPerformance = daily.Select(d => new { date = d.Date, match = Math.Round((d.AvgPP / referencePP) * 100.0, 1) }).ToList();
+
+        return new { 
+            totalPlays = summary.TotalPlays, 
+            totalMinutes = summary.TotalDurationMs / 60000.0, 
+            avgAccuracy = summary.AvgAccuracy, 
+            avgPP = summary.AvgPP, 
+            avgUR = summary.AvgUR, 
+            avgKeyRatio = summary.AvgKeyRatio, 
+            playsToday, 
+            streak, 
+            perfMatch = summary.TotalPlays > 0 ? (summary.AvgPP / referencePP) * 100.0 : 0, 
+            currentForm = form, 
+            mentality = Math.Clamp(mentality, 0, 100), 
+            dailyActivity = daily.Select(d => new { date = d.Date, plays = d.PlayCount, minutes = d.TotalDurationMs / 60000.0, avgPP = d.AvgPP, avgAcc = d.AvgAcc * 100.0, avgUR = d.AvgUR, avgKeyRatio = d.AvgKeyRatio }), 
+            dailyPerformance, 
+            hitErrors = await GetRecentHitErrorsAsync(days) 
+        };
     }
 
     private async Task<List<double>> GetRecentHitErrorsAsync(int days)

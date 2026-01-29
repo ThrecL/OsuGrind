@@ -319,6 +319,9 @@ public partial class WebViewWindow : Window
             // Start API server with retry logic (handled internally now)
             await Task.Run(() => _apiServer.Start());
 
+            // Start Tracker Service with DB Access
+            try { TrackerService.Start(_db); } catch { }
+
             // Initialize WebView2
             var userDataFolder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

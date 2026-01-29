@@ -49,9 +49,9 @@ public partial class App : System.Windows.Application
 
         base.OnStartup(e);
 
-        // Start Tracking
-        try { TrackerService.Start(); } catch { }
-
+        // Start Tracking (will wait for DB to be set in MainWindow or handle nulls gracefully)
+        // We defer Start() to WebViewWindow_Loaded where we have the DB instance
+        
         // Launch the WebView2-based window
         var mainWindow = new WebViewWindow();
         mainWindow.Show();

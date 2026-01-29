@@ -31,8 +31,14 @@ namespace OsuGrind.LiveReading
             _lazerReader = new LazerMemoryReader(db, soundPlayer, api);
             _stableReader = new StableMemoryReader(db, soundPlayer, api);
             
-            _lazerReader.OnPlayRecorded += (success) => OnPlayRecorded?.Invoke(success);
-            _stableReader.OnPlayRecorded += (success) => OnPlayRecorded?.Invoke(success);
+            _lazerReader.OnPlayRecorded += (success) => {
+                OnPlayRecorded?.Invoke(success);
+                if (success) TrackerService.TriggerSync();
+            };
+            _stableReader.OnPlayRecorded += (success) => {
+                OnPlayRecorded?.Invoke(success);
+                if (success) TrackerService.TriggerSync();
+            };
         }
 
         public void Initialize()

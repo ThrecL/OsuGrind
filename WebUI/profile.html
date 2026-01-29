@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile - OSU!GRIND</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/profile.css">
+    <link rel="stylesheet" href="/css/analytics.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .profile-page-container {
+            max-width: 1100px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        .loading-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 60vh;
+            color: var(--text-muted);
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .chart-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .profile-header-wrap {
+            position: relative;
+            height: 300px;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 40px;
+            background: #111;
+        }
+        .profile-cover-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.4;
+            filter: blur(5px);
+        }
+        .profile-overlay-content {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: flex-end;
+            padding: 40px;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+        }
+        .profile-main-info {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+        }
+        .profile-avatar-big {
+            width: 120px;
+            height: 120px;
+            border-radius: 20px;
+            border: 4px solid var(--accent-pink);
+            box-shadow: 0 0 20px rgba(255, 102, 165, 0.3);
+        }
+        .username-big {
+            font-size: 42px;
+            font-weight: 900;
+            margin: 0;
+            letter-spacing: -1px;
+        }
+        .form-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 100px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-top: 10px;
+        }
+        .form-peak { background: var(--accent-yellow); color: #000; }
+        .form-stable { background: var(--accent-green); color: #000; }
+        .form-slumping { background: var(--accent-purple); color: #fff; }
+    </style>
+</head>
+<body class="theme-dark">
+    <header id="titlebar">
+        <div class="titlebar-left">
+            <a href="/" style="text-decoration: none; display: flex; align-items: center; gap: 10px; color: inherit;">
+                <img src="/osugrind_icon.png" alt="OsuGrind" class="app-icon">
+                <span class="app-title">OSU!GRIND</span>
+            </a>
+            <span class="separator">|</span>
+            <a href="/leaderboard" style="color: var(--text-muted); text-decoration: none; font-size: 12px; font-weight: 600;">LEADERBOARD</a>
+        </div>
+    </header>
+
+    <div id="mainContent" class="profile-page-container">
+        <div class="loading-screen" id="loading">
+            <h2>Loading Player Profile...</h2>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://osugrind-tracker.3cl-exe.workers.dev';
+        const username = window.location.pathname.split('/').pop();
+
+        async function init() {
+            try {
+                const res = await fetch(`${API_URL}/profile/u/${username}`);
+                if (!res.ok) throw new Error("User not found");
+                const data = await res.json();
+                renderProfile(data);
+            } catch (err) {
+                document.getElementById('mainContent').innerHTML = `
+                    <div class="loading-screen">
+                        <h1 style="color: var(--accent-pink)">404</h1>
+                        <p>Player "${username}" has not registered with OsuGrind yet.</p>
+                        <a href="/leaderboard" class="btn-login" style="margin-top: 20px; text-decoration: none;">View Leaderboard</a>
+                    </div>
+                `;
+            }
+        }
+
+        function renderProfile(user) {
+            const container = document.getElementById('mainContent');
+            const graphs = user.graphs_json ? JSON.parse(user.graphs_json) : null;
+            
+            container.innerHTML = `
+                <div class="profile-header-wrap">
+                    <img src="${user.cover_url || '/cover_default.jpg'}" class="profile-cover-img">
+                    <div class="profile-overlay-content">
+                        <div class="profile-main-info">
+                            <img src="${user.avatar_url}" class="profile-avatar-big">
+                            <div>
+                                <h1 class="username-big">${user.username}</h1>
+                                <div class="player-meta" style="font-size: 18px;">${user.country} • ${user.streak} day streak 🔥</div>
+                                <span class="form-badge form-${(user.form || 'stable').toLowerCase()}">${user.form || 'STABLE'}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="card mini-card"><span class="mini-label">TOTAL PLAYS</span><span class="mini-value accent">${user.total_plays.toLocaleString()}</span></div>
+                    <div class="card mini-card"><span class="mini-label">PLAY TIME</span><span class="mini-value neon-cyan">${Math.round(user.total_time / 60)}h</span></div>
+                    <div class="card mini-card"><span class="mini-label">AVG ACCURACY</span><span class="mini-value neon-green">${(user.avg_acc * 100).toFixed(2)}%</span></div>
+                    <div class="card mini-card"><span class="mini-label">AVG PP</span><span class="mini-value neon-purple">${Math.round(user.avg_pp)}</span></div>
+                    <div class="card mini-card"><span class="mini-label">AVG UR</span><span class="mini-value neon-cyan">${user.avg_ur.toFixed(2)}</span></div>
+                </div>
+
+                <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                    <div class="card mini-card"><span class="mini-label">OSU! RANKED SCORE</span><span class="mini-value" style="color: #fff;">${user.osu_ranked_score.toLocaleString()}</span></div>
+                    <div class="card mini-card"><span class="mini-label">OSU! TOTAL PLAYS</span><span class="mini-value" style="color: #fff;">${user.osu_play_count.toLocaleString()}</span></div>
+                    <div class="card mini-card"><span class="mini-label">OSU! LEVEL</span><span class="mini-value" style="color: #fff;">${user.osu_level.toFixed(2)}</span></div>
+                </div>
+
+                <div class="chart-grid">
+                    <div class="cardd chart-card" style="height: 400px;">
+                        <div class="chart-header"><span class="mini-label">PP PROGRESS (LAST 30 DAYS)</span></div>
+                        <div class="chart-container"><canvas id="ppChart"></canvas></div>
+                    </div>
+                    <div class="cardd chart-card" style="height: 400px;">
+                        <div class="chart-header"><span class="mini-label">HIT ERROR HISTOGRAM</span></div>
+                        <div class="chart-container"><canvas id="hitChart"></canvas></div>
+                    </div>
+                </div>
+            `;
+
+            if (graphs) {
+                renderCharts(graphs);
+            }
+        }
+
+        function renderCharts(graphs) {
+            // PP Chart
+            const ctxPp = document.getElementById('ppChart').getContext('2d');
+            new Chart(ctxPp, {
+                type: 'line',
+                data: {
+                    labels: graphs.timeline.map(t => t.d),
+                    datasets: [{
+                        label: 'Average PP',
+                        data: graphs.timeline.map(t => t.pp),
+                        borderColor: '#b673ff',
+                        backgroundColor: 'rgba(182, 115, 255, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: false, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { display: false } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            // Histogram Chart
+            const ctxHit = document.getElementById('hitChart').getContext('2d');
+            const sortedKeys = Object.keys(graphs.histogram).map(Number).sort((a,b) => a-b);
+            new Chart(ctxHit, {
+                type: 'bar',
+                data: {
+                    labels: sortedKeys.map(k => k + 'ms'),
+                    datasets: [{
+                        data: sortedKeys.map(k => graphs.histogram[k]),
+                        backgroundColor: '#ff66a5',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { display: false }, x: { grid: { display: false } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html>
