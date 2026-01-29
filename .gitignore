@@ -18,6 +18,14 @@ build_errors.txt
 
 # Secrets & Config
 secrets.json
+index.js
+tracker_metadata.json
+worker.js
+metadata.json
+debug_worker.js
+.env
+wrangler.toml
+
 
 # Logs & Temp
 score_debug.txt
