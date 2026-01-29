@@ -4,7 +4,6 @@ namespace OsuGrind.Api.Models
 {
     public class RewindPpRequest
     {
-        public long ScoreId { get; set; }
         public string BeatmapPath { get; set; } = string.Empty;
         public string BeatmapHash { get; set; } = string.Empty;
         public List<string> Mods { get; set; } = new();

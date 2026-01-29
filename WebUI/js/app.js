@@ -181,7 +181,7 @@ class OsuGrindApp {
                         if (isAnalysis && (!window._lastPpUpdate || Date.now() - window._lastPpUpdate > 200)) {
                             window._lastPpUpdate = Date.now();
                             window.api.calculateRewindPp({
-                                scoreId: ctx.scoreId, beatmapHash: ctx.beatmapHash, mods: ctx.mods,
+                                beatmapPath: ctx.beatmapPath, beatmapHash: ctx.beatmapHash, mods: ctx.mods,
                                 combo: rewindCombo, count300: h300, count100: h100, count50: h50, misses: miss, passedObjects: targetHits
                             }).then(res => {
                                 if (res && res.pp !== undefined && window.analysisSlots.pp) window.analysisSlots.pp.setValue(res.pp);

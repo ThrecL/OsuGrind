@@ -541,13 +541,15 @@ public partial class WebViewWindow : Window
     private void WebViewWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         _cts.Cancel();
-        try { _gameLoopTask?.Wait(TimeSpan.FromMilliseconds(500)); } catch { }
+        try { 
+            if (_gameLoopTask != null) _gameLoopTask.Wait(TimeSpan.FromMilliseconds(100)); 
+        } catch { }
         try { _apiServer.Stop(); } catch { }
         try { _osuReader.Dispose(); } catch { }
         try { _webView.Dispose(); } catch { } 
         try { _notifyIcon?.Dispose(); } catch { }
         
-        // Force the application to exit immediately
+        // Final aggressive termination to prevent lingering threads
         System.Windows.Application.Current.Shutdown();
     }
 

@@ -170,7 +170,6 @@ public class LazerScoreDetector
 
         return new CompletedPlay
         {
-            ScoreId = 0, 
             CreatedAtUtc = DateTime.UtcNow, // Use current time for live plays to ensure proper ordering
             BeatmapHash = s.MD5Hash ?? "", 
             Beatmap = s.Beatmap,

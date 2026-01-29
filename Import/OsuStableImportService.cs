@@ -109,7 +109,7 @@ namespace OsuGrind.Import
             }
 
             if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
-                return (0, 0, "osu!stable installation not found. Please open the install location in Settings.");
+                return (0, 0, "osu!stable not found.");
 
 
             var scoresDbPath = Path.Combine(path, "scores.db");
@@ -310,7 +310,6 @@ namespace OsuGrind.Import
 
                                     var play = new PlayRow
                                     {
-                                        ScoreId = 0,
                                         CreatedAtUtc = createdAt,
                                         Outcome = "pass",
                                         DurationMs = info?.TotalTime ?? 0,

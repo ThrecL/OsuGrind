@@ -63,16 +63,6 @@ namespace OsuGrind.Services
             string storageIni = Path.Combine(roamingPath, "storage.ini");
             if (!File.Exists(storageIni)) storageIni = Path.Combine(localPath, "storage.ini");
 
-
-
-            // Check G: drive fallback found by search
-            string gDrivePath = @"G:\osu-lazer-data";
-            if (Directory.Exists(gDrivePath) && File.Exists(Path.Combine(gDrivePath, "client.realm")))
-            {
-                storagePath = gDrivePath;
-                Log($"Found likely data path on G: drive: {storagePath}");
-            }
-
             if (File.Exists(storageIni))
             {
                 Log($"Found storage.ini at {storageIni}");
@@ -538,12 +528,6 @@ namespace OsuGrind.Services
                     
                     string roamingFiles = Path.Combine(roamingAppData, "osu", "files");
                     if (Directory.Exists(roamingFiles) && roamingFiles != filesRoot) candidatePaths.Add(roamingFiles);
-
-                    string gExports = @"G:\osu-lazer-data\exports";
-                    if (Directory.Exists(gExports)) candidatePaths.Add(gExports);
-                    string gFiles = @"G:\osu-lazer-data\files";
-                    if (Directory.Exists(gFiles)) candidatePaths.Add(gFiles);
-
 
                     foreach (var root in candidatePaths)
                     {

@@ -2319,7 +2319,6 @@ namespace OsuGrind.LiveReading
             // 4. Fallbacks
             var localOsu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu");
             if (Directory.Exists(Path.Combine(localOsu, "files"))) return Path.Combine(localOsu, "files");
-            if (Directory.Exists(@"G:\osu-lazer-data\files")) return @"G:\osu-lazer-data\files";
 
             return Path.Combine(roamingOsu, "files"); // Final default
         }
@@ -3121,7 +3120,7 @@ namespace OsuGrind.LiveReading
                 string localFiles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu", "files");
                 string roamingFiles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu", "files");
                 
-                var candidates = new[] { localFiles, roamingFiles, @"G:\osu-lazer-data\files" };
+                var candidates = new[] { localFiles, roamingFiles };
 
                 foreach(var root in candidates)
                 {

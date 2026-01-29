@@ -300,7 +300,6 @@ public class StableScoreDetector
 
         return new CompletedPlay
         {
-            ScoreId = 0,
             CreatedAtUtc = DateTime.UtcNow,
             BeatmapHash = s.MD5Hash ?? "",
             Beatmap = s.Beatmap,

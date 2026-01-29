@@ -12,7 +12,6 @@ public sealed record CursorHitPoint(double time, double dx, double dy, int resul
 
 public sealed class CompletedPlay
 {
-    public long ScoreId { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public string BeatmapHash { get; set; } = "";
     public string Beatmap { get; set; } = "";

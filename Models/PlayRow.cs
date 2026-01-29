@@ -11,7 +11,6 @@ public sealed class PlayRow : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public long Id { get; set; }
-    public long ScoreId { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 
     public string PlayedAtLocal => CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
@@ -226,7 +225,6 @@ public sealed class PlayRow : INotifyPropertyChanged
     {
         return new PlayRow
         {
-            ScoreId = c.ScoreId,
             CreatedAtUtc = c.CreatedAtUtc,
             Outcome = c.Outcome,
             DurationMs = c.DurationMs,

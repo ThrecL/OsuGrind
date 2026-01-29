@@ -63,7 +63,7 @@ public class LazerImportService
         DebugService.Log($"Realm path: {realmPath}", "LazerImportService");
 
         if (!File.Exists(realmPath))
-            return (0, 0, $"osu!lazer installation not found. Please open the install location in Settings.");
+            return (0, 0, $"osu!lazer not found.");
 
 
         // Copy realm to temp to avoid file locks
@@ -87,6 +87,8 @@ public class LazerImportService
         };
 
         using var rosu = new RosuService();
+        int scoresAdded = 0;
+        int scoresSkipped = 0;
 
         try
         {
@@ -94,12 +96,10 @@ public class LazerImportService
             var (mapsAdded, mapsSkipped, hashToPath) = await ImportBeatmaps(config, rosu, lazerFolderPath);
             DebugService.Log($"Beatmaps processed: Added={mapsAdded}, Skipped={mapsSkipped}", "LazerImportService");
             
+            // ...
             // 2. Import Scores
             var extractedScores = ExtractScoresDynamic(config, targetUsername);
             DebugService.Log($"Extracted {extractedScores.Count} scores from Realm", "LazerImportService");
-            
-            int scoresAdded = 0;
-            int scoresSkipped = 0;
             
             // PERFORMANCE: Cache beatmaps once instead of querying DB for every score
             var allBeatmaps = await db.GetBeatmapsAsync();
@@ -114,139 +114,155 @@ public class LazerImportService
 
             var batchPlays = new List<PlayRow>();
 
-            foreach (var s in extractedScores)
+            // LIMIT PROCESSING TIME: Only analyze the first 1000 scores to avoid browser timeout
+            // The user can run import again to get the rest (deduplication handles skipping)
+            var scoresToProcess = extractedScores.Take(1000).ToList();
+            if (extractedScores.Count > 1000) DebugService.Log($"Capping import to 1000 scores to avoid timeout", "LazerImportService");
+
+            foreach (var s in scoresToProcess)
             {
-                if (string.IsNullOrEmpty(s.BeatmapHash))
-                {
-                    scoresSkipped++;
-                    continue;
-                }
-
-                // DEDUPLICATION CHECK
-                string sig = $"{s.BeatmapHash}|{s.TotalScore}|{s.Date.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)}";
-                if (existingSignatures.Contains(sig))
-                {
-                    scoresSkipped++;
-                    continue;
-                }
-                existingSignatures.Add(sig);
-
-                // Parse Hits
-                var statsDic = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, int>>(s.StatisticsJson ?? "{}") ?? new();
-                int n300 = statsDic.GetValueOrDefault("great", 0) + statsDic.GetValueOrDefault("Great", 0);
-                int n100 = statsDic.GetValueOrDefault("ok", 0) + statsDic.GetValueOrDefault("Ok", 0);
-                int n50 = statsDic.GetValueOrDefault("meh", 0) + statsDic.GetValueOrDefault("Meh", 0);
-                int nMiss = statsDic.GetValueOrDefault("miss", 0) + statsDic.GetValueOrDefault("Miss", 0);
-
-                // Analyze Lazer HitEvents for UR and HitErrors
-                double lazerUR = 0;
-                if (s.HitOffsets != null && s.HitOffsets.Count > 0)
-                {
-                    double avg = s.HitOffsets.Average();
-                    double sumSq = s.HitOffsets.Sum(d => Math.Pow(d - avg, 2));
-                    lazerUR = Math.Sqrt(sumSq / s.HitOffsets.Count) * 10;
-                }
-
-                // Parse Mods
-                List<string> modsListAcronyms = new();
-                uint modsBits = 0;
-                double clockRate = 1.0;
-                try
-                {
-                    var modsJArray = Newtonsoft.Json.JsonConvert.DeserializeObject<List<Newtonsoft.Json.Linq.JObject>>(s.ModsJson ?? "[]");
-                    if (modsJArray != null)
+                try {
+                    if (string.IsNullOrEmpty(s.BeatmapHash))
                     {
-                        foreach (var m in modsJArray)
-                        {
-                            var acronym = m["acronym"]?.ToString();
-                            if (!string.IsNullOrEmpty(acronym)) modsListAcronyms.Add(acronym);
-                        }
+                        scoresSkipped++;
+                        continue;
                     }
-                    modsBits = GetModsBits(modsListAcronyms);
-                    clockRate = RosuService.GetClockRateFromMods(modsBits);
-                }
-                catch { }
 
-                string modsString = modsListAcronyms.Count > 0 ? string.Join(",", modsListAcronyms) : "NM";
+                    // DEDUPLICATION CHECK
+                    string sig = $"{s.BeatmapHash}|{s.TotalScore}|{s.Date.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)}";
+                    if (existingSignatures.Contains(sig))
+                    {
+                        scoresSkipped++;
+                        continue;
+                    }
+                    existingSignatures.Add(sig);
 
-                // Calculate PP via Rosu if we have the file
-                double calculatedPP = s.PP;
-                
-                int totalObjects = 0;
-                if (beatmapByHash.TryGetValue(s.BeatmapHash, out var beatmap))
-                {
-                    totalObjects = beatmap.Circles + beatmap.Sliders + beatmap.Spinners;
-                }
+                    // Parse Hits
+                    var statsDic = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, int>>(s.StatisticsJson ?? "{}") ?? new();
+                    int n300 = statsDic.GetValueOrDefault("great", 0) + statsDic.GetValueOrDefault("Great", 0);
+                    int n100 = statsDic.GetValueOrDefault("ok", 0) + statsDic.GetValueOrDefault("Ok", 0);
+                    int n50 = statsDic.GetValueOrDefault("meh", 0) + statsDic.GetValueOrDefault("Meh", 0);
+                    int nMiss = statsDic.GetValueOrDefault("miss", 0) + statsDic.GetValueOrDefault("Miss", 0);
 
-                if (hashToPath.TryGetValue(s.BeatmapHash, out string? osuPath) && File.Exists(osuPath))
-                {
-                    rosu.UpdateContext(osuPath);
-                    int passedObjects = (s.Rank >= 0) ? -1 : 0; 
+                    // Analyze Lazer HitEvents for UR and HitErrors
+                    double lazerUR = 0;
+                    if (s.HitOffsets != null && s.HitOffsets.Count > 0)
+                    {
+                        try {
+                            double avg = s.HitOffsets.Average();
+                            double sumSq = s.HitOffsets.Sum(d => Math.Pow(d - avg, 2));
+                            lazerUR = Math.Sqrt(sumSq / s.HitOffsets.Count) * 10;
+                        } catch { }
+                    }
+
+                    // Parse Mods
+                    List<string> modsListAcronyms = new();
+                    uint modsBits = 0;
+                    double clockRate = 1.0;
+                    try
+                    {
+                        var modsJArray = Newtonsoft.Json.JsonConvert.DeserializeObject<List<Newtonsoft.Json.Linq.JObject>>(s.ModsJson ?? "[]");
+                        if (modsJArray != null)
+                        {
+                            foreach (var m in modsJArray)
+                            {
+                                var acronym = m["acronym"]?.ToString();
+                                if (!string.IsNullOrEmpty(acronym)) modsListAcronyms.Add(acronym);
+                            }
+                        }
+                        modsBits = GetModsBits(modsListAcronyms);
+                        clockRate = RosuService.GetClockRateFromMods(modsBits);
+                    }
+                    catch { }
+
+                    string modsString = modsListAcronyms.Count > 0 ? string.Join(",", modsListAcronyms) : "NM";
+
+                    // Calculate PP via Rosu if we have the file
+                    double calculatedPP = s.PP;
                     
-                    var pp = rosu.CalculatePp(modsBits, s.Combo, n300, n100, n50, nMiss, passedObjects, s.SliderTailHit, s.SmallTickHit, s.LargeTickHit, clockRate);
-                    if (pp > 0) calculatedPP = pp;
-                }
-
-                // Determine outcome and grade
-                string outcome = s.Rank >= 0 ? "pass" : "fail";
-                string grade = MapRankToGrade(s.Rank);
-
-                // Score conversion (Standardized to Classic)
-                long reportedScore = s.TotalScore;
-                if (totalObjects > 0)
-                {
-                     double classicScore = ((Math.Pow(totalObjects, 2) * 32.57 + 100000) * reportedScore) / 1000000.0;
-                     reportedScore = (long)Math.Round(classicScore);
-                }
-
-                var row = new PlayRow
-                {
-                    ScoreId = 0,
-                    Beatmap = $"{s.BeatmapArtist} - {s.BeatmapTitle} [{s.BeatmapVersion}]",
-                    BeatmapHash = s.BeatmapHash,
-                    CreatedAtUtc = s.Date.ToUniversalTime(),
-                    DurationMs = (int)s.BeatmapLength,
-                    Outcome = outcome,
-                    Rank = grade,
-                    Accuracy = s.Accuracy,
-                    Mods = modsString,
-                    Score = reportedScore,
-                    Combo = s.Combo,
-                    Count300 = n300,
-                    Count100 = n100,
-                    Count50 = n50,
-                    Misses = nMiss,
-                    PP = calculatedPP,
-                    Stars = s.StarRating,
-                    UR = lazerUR,
-                    HitErrorsJson = s.HitOffsets != null ? System.Text.Json.JsonSerializer.Serialize(s.HitOffsets) : null,
-                    HitOffsets = string.Join(",", s.HitOffsets?.Select(o => o.ToString("F2")) ?? Enumerable.Empty<string>()),
-                    ReplayHash = s.ReplayHash,
-                    MapPath = osuPath ?? ""
-                };
-
-                // ANALYZE LAZER REPLAY FOR TAPPING STATS IF POSSIBLE
-                if (!string.IsNullOrEmpty(s.ReplayHash) && !string.IsNullOrEmpty(osuPath))
-                {
-                    try {
-                        string replayPath = Path.Combine(lazerFilesPath, s.ReplayHash.Substring(0, 1), s.ReplayHash.Substring(0, 2), s.ReplayHash);
-                        if (File.Exists(replayPath))
-                        {
-                            DebugService.Log($"Analyzing lazer replay: {s.ReplayHash}", "LazerImportService");
-                            var analysis = MissAnalysisService.Analyze(osuPath, replayPath);
-                            // UR from MissAnalysis is often more consistent if beatmap is fully available
-                            if (analysis.UR > 0) row.UR = analysis.UR;
-                            row.KeyRatio = analysis.KeyRatio;
-                            if (analysis.HitErrors.Count > 0) row.HitErrorsJson = System.Text.Json.JsonSerializer.Serialize(analysis.HitErrors);
-                            DebugService.Log($"Analysis complete: UR={analysis.UR:F2}, KeyRatio={analysis.KeyRatio:P1}", "LazerImportService");
-                        }
-                    } catch (Exception ex) {
-                         DebugService.Error($"Analysis failed for lazer replay {s.ReplayHash}: {ex.Message}", "LazerImportService");
+                    int totalObjects = 0;
+                    if (beatmapByHash.TryGetValue(s.BeatmapHash, out var beatmap))
+                    {
+                        totalObjects = beatmap.Circles + beatmap.Sliders + beatmap.Spinners;
                     }
-                }
 
-                batchPlays.Add(row);
-                scoresAdded++;
+                    hashToPath.TryGetValue(s.BeatmapHash, out string? osuPath);
+                    if (!string.IsNullOrEmpty(osuPath) && File.Exists(osuPath))
+                    {
+                        try {
+                            rosu.UpdateContext(osuPath);
+                            int passedObjects = (s.Rank >= 0) ? -1 : 0; 
+                            
+                            var pp = rosu.CalculatePp(modsBits, s.Combo, n300, n100, n50, nMiss, passedObjects, s.SliderTailHit, s.SmallTickHit, s.LargeTickHit, clockRate);
+                            if (pp > 0) calculatedPP = pp;
+                        } catch { }
+                    }
+
+                    // Determine outcome and grade
+                    string outcome = s.Rank >= 0 ? "pass" : "fail";
+                    string grade = MapRankToGrade(s.Rank);
+
+                    // Score conversion (Standardized to Classic)
+                    long reportedScore = s.TotalScore;
+                    if (totalObjects > 0)
+                    {
+                         double classicScore = ((Math.Pow(totalObjects, 2) * 32.57 + 100000) * reportedScore) / 1000000.0;
+                         reportedScore = (long)Math.Round(classicScore);
+                    }
+
+                    var row = new PlayRow
+                    {
+                        Beatmap = $"{s.BeatmapArtist} - {s.BeatmapTitle} [{s.BeatmapVersion}]",
+                        BeatmapHash = s.BeatmapHash,
+                        CreatedAtUtc = s.Date.ToUniversalTime(),
+                        DurationMs = (int)s.BeatmapLength,
+                        Outcome = outcome,
+                        Rank = grade,
+                        Accuracy = s.Accuracy,
+                        Mods = modsString,
+                        Score = reportedScore,
+                        Combo = s.Combo,
+                        Count300 = n300,
+                        Count100 = n100,
+                        Count50 = n50,
+                        Misses = nMiss,
+                        PP = calculatedPP,
+                        Stars = s.StarRating,
+                        UR = lazerUR,
+                        HitErrorsJson = s.HitOffsets != null ? System.Text.Json.JsonSerializer.Serialize(s.HitOffsets) : null,
+                        HitOffsets = string.Join(",", s.HitOffsets?.Select(o => o.ToString("F2")) ?? Enumerable.Empty<string>()),
+                        ReplayHash = s.ReplayHash,
+                        MapPath = osuPath ?? "",
+                        Notes = "Imported from lazer data"
+                    };
+
+                    // ANALYZE LAZER REPLAY FOR TAPPING STATS IF POSSIBLE
+                    if (!string.IsNullOrEmpty(s.ReplayHash) && !string.IsNullOrEmpty(osuPath))
+                    {
+                        try {
+                            string replayPath = Path.Combine(lazerFilesPath, s.ReplayHash.Length >= 2 ? s.ReplayHash.Substring(0, 1) : "0", s.ReplayHash.Length >= 2 ? s.ReplayHash.Substring(0, 2) : "00", s.ReplayHash);
+                            if (File.Exists(replayPath))
+                            {
+                                row.ReplayFile = replayPath;
+                                DebugService.Log($"Analyzing lazer replay: {s.ReplayHash}", "LazerImportService");
+                                var analysis = MissAnalysisService.Analyze(osuPath, replayPath);
+                                // UR from MissAnalysis is often more consistent if beatmap is fully available
+                                if (analysis.UR > 0) row.UR = analysis.UR;
+                                row.KeyRatio = analysis.KeyRatio;
+                                if (analysis.HitErrors.Count > 0) row.HitErrorsJson = System.Text.Json.JsonSerializer.Serialize(analysis.HitErrors);
+                                DebugService.Log($"Analysis complete: UR={analysis.UR:F2}, KeyRatio={analysis.KeyRatio:P1}", "LazerImportService");
+                            }
+                        } catch (Exception ex) {
+                             DebugService.Error($"Analysis failed for lazer replay {s.ReplayHash}: {ex.Message}", "LazerImportService");
+                        }
+                    }
+
+                    batchPlays.Add(row);
+                    scoresAdded++;
+                } catch (Exception ex) {
+                    DebugService.Error($"Failed to process score for map {s.BeatmapHash}: {ex.Message}", "LazerImportService");
+                    scoresSkipped++;
+                }
             }
 
             if (batchPlays.Count > 0)
@@ -260,7 +276,7 @@ public class LazerImportService
         catch (Exception ex)
         {
             DebugService.Error($"Lazer Import Exception: {ex}", "LazerImportService");
-            return (0, 0, $"Import failed: {ex.Message}");
+            return (scoresAdded, scoresSkipped, $"Import partially failed: {ex.Message}");
         }
     }
 
@@ -304,6 +320,8 @@ public class LazerImportService
         }
         else return (0, 0, hashToPath);
 
+        var batchMaps = new List<BeatmapRow>();
+
         foreach (var item in beatmaps)
         {
             if (usingSets)
@@ -311,8 +329,12 @@ public class LazerImportService
                 var nestedMaps = item.DynamicApi.GetList<IRealmObjectBase>("Beatmaps");
                 foreach (var b in nestedMaps)
                 {
-                    var (ok, path) = await ProcessBeatmap(b, rosu, lazerFilesPath);
-                    if (ok) added++; else skipped++;
+                    var (ok, path, row) = await ProcessBeatmap(b, rosu, lazerFilesPath);
+                    if (ok) {
+                        added++;
+                        if (row != null) batchMaps.Add(row);
+                    } else skipped++;
+                    
                     if (!string.IsNullOrEmpty(path))
                     {
                         var h = b.DynamicApi.Get<string>("MD5Hash") ?? b.DynamicApi.Get<string>("Hash");
@@ -322,8 +344,12 @@ public class LazerImportService
             }
             else
             {
-                var (ok, path) = await ProcessBeatmap(item, rosu, lazerFilesPath);
-                if (ok) added++; else skipped++;
+                var (ok, path, row) = await ProcessBeatmap(item, rosu, lazerFilesPath);
+                if (ok) {
+                    added++;
+                    if (row != null) batchMaps.Add(row);
+                } else skipped++;
+
                 if (!string.IsNullOrEmpty(path))
                 {
                     var h = item.DynamicApi.Get<string>("MD5Hash") ?? item.DynamicApi.Get<string>("Hash");
@@ -331,23 +357,29 @@ public class LazerImportService
                 }
             }
         }
+
+        if (batchMaps.Count > 0)
+        {
+            await db.InsertOrUpdateBeatmapBatchAsync(batchMaps);
+        }
+
         return (added, skipped, hashToPath);
     }
 
-    private async Task<(bool ok, string? path)> ProcessBeatmap(IRealmObjectBase b, RosuService rosu, string lazerFilesPath)
+    private async Task<(bool ok, string? path, BeatmapRow? row)> ProcessBeatmap(IRealmObjectBase b, RosuService rosu, string lazerFilesPath)
     {
         try
         {
             string md5 = b.DynamicApi.Get<string>("MD5Hash") ?? "";
             string sha2 = b.DynamicApi.Get<string>("Hash") ?? "";
             string identifyingHash = !string.IsNullOrEmpty(md5) ? md5 : sha2;
-            if (string.IsNullOrEmpty(identifyingHash)) return (false, null);
+            if (string.IsNullOrEmpty(identifyingHash)) return (false, null, null);
 
             var meta = b.DynamicApi.Get<IRealmObjectBase>("Metadata");
             var diff = b.DynamicApi.Get<IRealmObjectBase>("Difficulty");
             var ruleset = b.DynamicApi.Get<IRealmObjectBase>("Ruleset");
             
-            if (ruleset != null && ruleset.DynamicApi.Get<string>("ShortName") != "osu") return (false, null);
+            if (ruleset != null && ruleset.DynamicApi.Get<string>("ShortName") != "osu") return (false, null, null);
 
             var row = new BeatmapRow
             {
@@ -398,10 +430,9 @@ public class LazerImportService
                 }
             }
 
-            await db.InsertOrUpdateBeatmapAsync(row);
-            return (true, osuPath);
+            return (true, osuPath, row);
         }
-        catch { return (false, null); }
+        catch { return (false, null, null); }
     }
 
     private uint GetModsBits(List<string> mods)
