@@ -60,7 +60,6 @@ public partial class WebViewWindow : Window
         catch { /* Fallback to default if icon fails to load */ }
 
         // Initialize services
-
         _db = new TrackerDb();
         _soundPlayer = new SoundPlayer();
         _apiServer = new ApiServer(_db);
@@ -308,19 +307,17 @@ public partial class WebViewWindow : Window
     }
 
     private async void WebViewWindow_Loaded(object sender, RoutedEventArgs e)
-
     {
         try
         {
-            // Initialize database
-            await _db.MigrateAsync();
+            // Initialize database in background
+            await Task.Run(async () => await _db.MigrateAsync());
 
             // Initialize Goal state (prevents playing sound if already met)
             try { await GoalManager.InitializeAsync(_db); } catch { }
             
-            // Start API server
-
-            _apiServer.Start();
+            // Start API server with retry logic (handled internally now)
+            await Task.Run(() => _apiServer.Start());
 
             // Initialize WebView2
             var userDataFolder = Path.Combine(
@@ -359,6 +356,9 @@ public partial class WebViewWindow : Window
 
             // Handle messages from JavaScript
             _webView.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
+
+            // Wait a brief moment to ensure server socket is fully accepting (extra safety)
+            await Task.Delay(100);
 
             // Navigate to the local server
             _webView.CoreWebView2.Navigate($"http://127.0.0.1:{_apiServer.Port}/");

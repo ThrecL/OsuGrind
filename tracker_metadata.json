@@ -1,0 +1,10 @@
+{
+  "main_module": "index.js",
+  "bindings": [
+    {
+      "name": "DB",
+      "type": "d1",
+      "id": "1aae67ae-f6e2-4a8a-be1f-56c29d878103"
+    }
+  ]
+}

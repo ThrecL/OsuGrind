@@ -165,15 +165,52 @@ public class TrackerDb : IDisposable
 
     public async Task<int> GetPlayStreakAsync()
     {
-        int targetPlays = SettingsManager.Current.GoalPlays; int targetHits = SettingsManager.Current.GoalHits; double targetStars = SettingsManager.Current.GoalStars; int targetPP = SettingsManager.Current.GoalPP;
-        using var conn = Open(); using var cmd = conn.CreateCommand(); cmd.CommandText = "SELECT date(created_at_utc, 'localtime') as d, COUNT(1) as plays, SUM(count300 + count100 + count50 + misses) as hits, SUM(CASE WHEN stars >= $starThreshold THEN 1 ELSE 0 END) as star_plays, SUM(pp) as total_pp FROM plays WHERE score > 0 GROUP BY d ORDER BY d DESC"; cmd.Parameters.AddWithValue("$starThreshold", targetStars);
-        var history = new List<(DateTime Date, int Plays, int Hits, int StarPlays, double TotalPP)>(); using var reader = await cmd.ExecuteReaderAsync(); while (await reader.ReadAsync()) if (DateTime.TryParse(reader.GetString(0), out var dt)) history.Add((dt.Date, reader.GetInt32(1), reader.IsDBNull(2) ? 0 : reader.GetInt32(2), reader.IsDBNull(3) ? 0 : reader.GetInt32(3), reader.IsDBNull(4) ? 0 : reader.GetDouble(4)));
-        if (history.Count == 0) return 0;
-        var today = DateTime.Now.Date; var yesterday = today.AddDays(-1); int streak = 0; var currentCheck = today;
-        bool IsGoalMet(int p, int h, int s, double pp) { if (targetPlays > 0 && p < targetPlays) return false; if (targetHits > 0 && h < targetHits) return false; if (targetStars > 0 && s < 1) return false; if (targetPP > 0 && pp < targetPP) return false; return targetPlays > 0 || targetHits > 0 || targetStars > 0 || targetPP > 0; }
-        int idx = 0;
-        if (history.Count > 0 && history[0].Date == today) { if (IsGoalMet(history[0].Plays, history[0].Hits, history[0].StarPlays, history[0].TotalPP)) { } else { currentCheck = yesterday; idx = 1; } } else { currentCheck = yesterday; idx = 0; }
-        while (idx < history.Count) { var entry = history[idx]; if (entry.Date == currentCheck) { if (IsGoalMet(entry.Plays, entry.Hits, entry.StarPlays, entry.TotalPP)) { streak++; currentCheck = currentCheck.AddDays(-1); idx++; } else break; } else if (entry.Date < currentCheck) break; else idx++; }
+        int targetPlays = SettingsManager.Current.GoalPlays;
+        int targetHits = SettingsManager.Current.GoalHits;
+        double targetStars = SettingsManager.Current.GoalStars;
+        int targetPP = SettingsManager.Current.GoalPP;
+        
+        bool hasGoals = targetPlays > 0 || targetHits > 0 || targetStars > 0 || targetPP > 0;
+        if (!hasGoals) return 0;
+
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT date(created_at_utc, 'localtime') as d, COUNT(1) as plays, SUM(count300 + count100 + count50 + misses) as hits, SUM(CASE WHEN stars >= $starThreshold THEN 1 ELSE 0 END) as star_plays, SUM(pp) as total_pp FROM plays WHERE score > 0 GROUP BY d ORDER BY d DESC";
+        cmd.Parameters.AddWithValue("$starThreshold", targetStars);
+
+        var history = new Dictionary<string, (int Plays, int Hits, int StarPlays, double TotalPP)>();
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            history[reader.GetString(0)] = (
+                reader.GetInt32(1), 
+                reader.IsDBNull(2) ? 0 : reader.GetInt32(2), 
+                reader.IsDBNull(3) ? 0 : reader.GetInt32(3), 
+                reader.IsDBNull(4) ? 0 : reader.GetDouble(4)
+            );
+        }
+
+        bool IsGoalMet(string dateStr) {
+            if (!history.TryGetValue(dateStr, out var stats)) return false;
+            if (targetPlays > 0 && stats.Plays < targetPlays) return false;
+            if (targetHits > 0 && stats.Hits < targetHits) return false;
+            if (targetStars > 0 && stats.StarPlays < 1) return false;
+            if (targetPP > 0 && stats.TotalPP < targetPP) return false;
+            return true;
+        }
+
+        DateTime today = DateTime.Now.Date;
+        string todayStr = today.ToString("yyyy-MM-dd");
+        
+        int streak = 0;
+        if (IsGoalMet(todayStr)) streak = 1;
+
+        DateTime check = today.AddDays(-1);
+        while (IsGoalMet(check.ToString("yyyy-MM-dd")))
+        {
+            streak++;
+            check = check.AddDays(-1);
+        }
         return streak;
     }
 

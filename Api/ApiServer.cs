@@ -37,11 +37,38 @@ public class ApiServer : IDisposable
         _cts = new CancellationTokenSource();
         _listener = new HttpListener();
         _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
-        if (port != 7777) _listener.Prefixes.Add("http://127.0.0.1:7777/");
+        if (port != 7777) {
+            _listener.Prefixes.Add("http://127.0.0.1:7777/");
+            _listener.Prefixes.Add("http://localhost:7777/");
+        }
         RealmExportService.OnLog += async (msg) => await BroadcastLog(msg);
     }
 
-    public void Start() { try { _listener.Start(); _listenTask = Task.Run(ListenLoop); Console.WriteLine($"[ApiServer] Listening on http://127.0.0.1:{Port}/"); } catch (Exception ex) { File.WriteAllText("api_server_error.txt", ex.ToString()); throw; } }
+    public void Start() 
+    { 
+        int retries = 5;
+        while (retries > 0)
+        {
+            try 
+            { 
+                _listener.Start(); 
+                _listenTask = Task.Run(ListenLoop); 
+                Console.WriteLine($"[ApiServer] Listening on http://127.0.0.1:{Port}/");
+                return;
+            } 
+            catch (HttpListenerException) 
+            { 
+                retries--;
+                if (retries == 0) throw;
+                Thread.Sleep(500); // Wait for port to release
+            }
+            catch (Exception ex) 
+            { 
+                File.WriteAllText("api_server_error.txt", ex.ToString()); 
+                throw; 
+            } 
+        }
+    }
     public void Stop() { 
         _cts.Cancel(); 
         try { _listener.Stop(); } catch { } 
@@ -80,6 +107,7 @@ public class ApiServer : IDisposable
             case "/api/rewind/cursor-offsets": if (method == "POST") await HandleCursorOffsets(context); break;
             case "/api/history/recent": await SendJson(response, await _db.FetchRecentAsync(GetQueryInt(context, "limit", 50))); break;
             case "/api/history":
+            {
                 var dateStr = context.Request.QueryString["date"];
                 if (!string.IsNullOrEmpty(dateStr)) {
                     var plays = await _db.FetchPlaysByLocalDayAsync(dateStr);
@@ -87,17 +115,23 @@ public class ApiServer : IDisposable
                     await SendJson(response, new { plays, stats = new { plays = plays.Count, avgAccuracy = plays.Count > 0 ? plays.Average(p => p.Accuracy * 100) : 0, avgPP = plays.Count > 0 ? plays.Average(p => p.PP) : 0, duration = totalMs >= 3600000 ? $"{totalMs/3600000}h {(totalMs%3600000)/60000}m" : $"{totalMs/60000}m" } });
                 } else await SendJson(response, new { error = "Date missing" }, 400);
                 break;
+            }
             case "/api/history/month": 
+            {
                 var counts = await _db.GetMonthPlayCountsAsync(GetQueryInt(context, "year", DateTime.Now.Year), GetQueryInt(context, "month", DateTime.Now.Month));
                 await SendJson(response, new { playCounts = counts }); 
                 break;
+            }
             case "/api/debug/dump": await SendJson(response, await _db.DumpPlaysAsync()); break;
             case "/api/analytics": await SendJson(response, await GetAnalyticsDataAsync(GetQueryInt(context, "days", 30))); break;
             case "/api/goals":
+            {
                 var progress = await _db.GetTodayGoalProgressAsync(SettingsManager.Current.GoalStars);
                 await SendJson(response, new { settings = new { plays = SettingsManager.Current.GoalPlays, hits = SettingsManager.Current.GoalHits, stars = SettingsManager.Current.GoalStars, pp = SettingsManager.Current.GoalPP }, progress = new { plays = progress.Plays, hits = progress.Hits, stars = progress.StarPlays, pp = progress.TotalPP } });
                 break;
+            }
             case "/api/goals/save":
+            {
                 if (method == "POST") {
                     var payload = await ReadJsonBodyAsync<Dictionary<string, object>>(context);
                     if (payload != null) {
@@ -109,7 +143,9 @@ public class ApiServer : IDisposable
                     } else await SendJson(response, new { error = "Invalid payload" }, 400);
                 }
                 break;
+            }
             case "/api/import/lazer": 
+            {
                 if (method == "POST") { 
                     var (added, skipped, error) = await new LazerImportService(_db).ImportScoresAsync(SettingsManager.Current.LazerPath, SettingsManager.Current.Username); 
                     if (error != null) await SendJson(response, new { success = false, message = error }, 400); 
@@ -120,7 +156,9 @@ public class ApiServer : IDisposable
                     } 
                 } 
                 break;
+            }
             case "/api/import/stable": 
+            {
                 if (method == "POST") { 
                     var (added, skipped, error) = await new OsuStableImportService(_db).ImportScoresAsync(SettingsManager.Current.StablePath, SettingsManager.Current.Username, context.Request.QueryString["aliases"]); 
                     if (!string.IsNullOrEmpty(error)) await SendJson(response, new { success = false, message = error }, 400); 
@@ -131,14 +169,35 @@ public class ApiServer : IDisposable
                     } 
                 } 
                 break;
+            }
             case "/api/settings": if (method == "GET") await SendJson(response, SettingsManager.Current); else if (method == "POST") { var payload = await ReadJsonBodyAsync<Dictionary<string, object>>(context); if (payload != null) { SettingsManager.UpdateFromDictionary(payload); await SendJson(response, new { success = true }); } else await SendJson(response, new { error = "Invalid settings" }, 400); } break;
             case "/api/settings/delete-scores": if (method == "POST") { await _db.DeleteAllScoresAsync(); await BroadcastRefresh(); await SendJson(response, new { success = true }); } break;
             case "/api/settings/delete-beatmaps": if (method == "POST") { await _db.DeleteAllBeatmapsAsync(); await SendJson(response, new { success = true }); } break;
             case "/api/auth/login": await SendJson(response, new { authUrl = _authService.GetAuthUrl() }); break;
+            case "/callback":
+            {
+                var code = context.Request.QueryString["code"];
+                if (!string.IsNullOrEmpty(code)) {
+                    var exchangedToken = await _authService.ExchangeCodeForTokenAsync(code);
+                    if (!string.IsNullOrEmpty(exchangedToken)) {
+                        SettingsManager.Current.AccessToken = exchangedToken;
+                        SettingsManager.Save();
+                        await BroadcastRefresh();
+                        response.StatusCode = 200;
+                        var successHtml = "<html><body style='background:#111;color:#fff;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;'><h1>Login Successful!</h1><p>You can now close this window and return to OsuGrind.</p></body></html>";
+                        var bytes = Encoding.UTF8.GetBytes(successHtml);
+                        response.ContentType = "text/html";
+                        await response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
+                        response.Close();
+                    } else await SendJson(response, new { error = "Failed to exchange code" }, 400);
+                } else await SendJson(response, new { error = "Code missing" }, 400);
+                break;
+            }
             case "/api/profile":
-                string? token = SettingsManager.Current.AccessToken;
-                if (!string.IsNullOrEmpty(token)) {
-                    var profile = await _authService.GetUserProfileAsync(token);
+            {
+                string? profileToken = SettingsManager.Current.AccessToken;
+                if (!string.IsNullOrEmpty(profileToken)) {
+                    var profile = await _authService.GetUserProfileAsync(profileToken);
                     if (profile != null) { 
                         var p = profile.Value; double pp = 0; double acc = 0; int gr = 0; int cr = 0;
                         if (p.TryGetProperty("statistics", out var s)) { pp = s.GetProperty("pp").GetDouble(); acc = s.GetProperty("hit_accuracy").GetDouble(); gr = s.GetProperty("global_rank").ValueKind != JsonValueKind.Null ? s.GetProperty("global_rank").GetInt32() : 0; cr = s.GetProperty("country_rank").ValueKind != JsonValueKind.Null ? s.GetProperty("country_rank").GetInt32() : 0; }
@@ -147,7 +206,9 @@ public class ApiServer : IDisposable
                 }
                 await SendJson(response, new { isLoggedIn = false });
                 break;
+            }
             case "/api/profile/top":
+            {
                 string? topToken = SettingsManager.Current.AccessToken;
                 if (!string.IsNullOrEmpty(topToken)) {
                     var profile = await _authService.GetUserProfileAsync(topToken);
@@ -157,6 +218,15 @@ public class ApiServer : IDisposable
                     }
                 }
                 await SendJson(response, await _db.GetTopPlaysAsync(100));
+                break;
+            }
+            case "/api/auth/logout":
+                if (method == "POST") {
+                    SettingsManager.Current.AccessToken = null;
+                    SettingsManager.Save();
+                    await BroadcastRefresh();
+                    await SendJson(response, new { success = true });
+                }
                 break;
             case "/api/update": await SendJson(response, await UpdateService.CheckForUpdatesAsync()); break;
             case "/api/update/install": if (method == "POST") { var payload = await ReadJsonBodyAsync<JsonElement>(context); if (payload.TryGetProperty("zipUrl", out var zipProp)) { string? url = zipProp.GetString(); if (!string.IsNullOrEmpty(url)) await SendJson(response, new { success = await UpdateService.InstallUpdateAsync(url) }); } } break;

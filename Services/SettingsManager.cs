@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using Microsoft.Win32;
 using OsuGrind.Import;
 
 namespace OsuGrind.Services;
@@ -33,7 +34,7 @@ public class SettingsManager
         public double GoalStars { get; set; } = 5.0;
         public int GoalPP { get; set; } = 100;
         
-        public string? UniqueId { get; set; } // For anonymous tracking
+        public string? UniqueId { get; set; } // Persistent Hardware ID
     }
 
 
@@ -44,6 +45,21 @@ public class SettingsManager
     static SettingsManager()
     {
         Load();
+    }
+
+    private static string GetHardwareId()
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography");
+            if (key != null)
+            {
+                var val = key.GetValue("MachineGuid");
+                if (val != null) return val.ToString()!;
+            }
+        }
+        catch { }
+        return Guid.NewGuid().ToString(); // Fallback if registry fails
     }
 
     public static void Load()
@@ -67,10 +83,10 @@ public class SettingsManager
                 _current.StablePath = OsuStableImportService.AutoDetectStablePath();
             }
             
-            // Generate Unique ID if missing
+            // Generate/Retrieve Persistent Unique ID
             if (string.IsNullOrEmpty(_current.UniqueId))
             {
-                _current.UniqueId = Guid.NewGuid().ToString();
+                _current.UniqueId = GetHardwareId();
                 Save();
             }
             else if (string.IsNullOrEmpty(_current.StablePath)) // Save if path was detected but ID existed

@@ -31,7 +31,8 @@ public class TrackerService
             var payload = new
             {
                 userId = SettingsManager.Current.UniqueId,
-                version = "1.0.0" 
+                username = SettingsManager.Current.Username,
+                version = "1.0.1" 
             };
 
             var json = JsonSerializer.Serialize(payload);
