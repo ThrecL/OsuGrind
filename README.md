@@ -58,7 +58,7 @@ OsuGrind stands on the shoulders of these incredible projects:
 - [**Rewind**](https://github.com/abstrakt8) - Core WebGL replay engine.
 - [**osuMissAnalyzer**](https://github.com/ThereGoesMySanity) - Replay hit analysis logic.
 - [**tosu**](https://github.com/tosuapp) - Foundational memory research.
-- [**rosu-pp**](https://github.com/Max480-core/rosu-pp-js) - High-performance PP calculation.
+- [**rosu-pp**](https://github.com/MaxOhn) - High-performance PP calculation.
 
 ---
-*Not affiliated with ppy Pty Ltd or osu!*
+*Created by [3cL](https://osu.ppy.sh/users/19941927/osu)*
