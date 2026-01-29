@@ -56,9 +56,9 @@ public class TrackerService
 
             if (_db != null && SettingsManager.Current.AccessToken != null)
             {
-                // Fetch local analytics (30 days)
-                var summary = await _db.GetAnalyticsSummaryAsync(30);
-                var daily = await _db.GetDailyStatsAsync(30);
+                // Fetch local analytics (Full timeline)
+                var summary = await _db.GetAnalyticsSummaryAsync(0);
+                var daily = await _db.GetDailyStatsAsync(0);
                 var streak = await _db.GetPlayStreakAsync();
                 
                 // Form & Reference Calculation
@@ -107,26 +107,30 @@ public class TrackerService
                 var timeline = daily.Select(d => new { 
                     d = d.Date, 
                     p = d.PlayCount, 
-                    acc = Math.Round(d.AvgAcc, 4), 
+                    acc = Math.Round(d.AvgAcc * 100.0, 2), 
                     pp = Math.Round(d.AvgPP, 1), 
                     ur = Math.Round(d.AvgUR, 2), 
                     kr = Math.Round(d.AvgKeyRatio, 3),
-                    m = Math.Round((d.AvgPP / referencePP) * 100.0, 1) // Performance Match %
+                    m = referencePP > 0 ? Math.Round((d.AvgPP / referencePP) * 100.0, 1) : 0
                 }).ToList();
 
                 // Calendar: Compressed dictionary of play counts (only non-zero days)
                 var calendar = daily.Where(d => d.PlayCount > 0)
                                     .ToDictionary(d => d.Date, d => d.PlayCount);
 
-                var hitErrors = await GetRecentHitErrorsAsync(30);
+                var hitErrors = await GetRecentHitErrorsAsync(0);
                 var histogram = new Dictionary<string, int>();
+                
+                // Initialize all bins from -100 to 100 to ensure consistent chart alignment
+                for (int i = -100; i <= 100; i += 2) histogram[i.ToString()] = 0;
+
                 foreach (var err in hitErrors)
                 {
-                    int bin = (int)(Math.Round(err / 2.0) * 2);
+                    // Match JS Math.round exactly: Math.floor(x + 0.5)
+                    int bin = (int)Math.Floor(err / 2.0 + 0.5) * 2;
                     if (bin >= -100 && bin <= 100)
                     {
                         var key = bin.ToString();
-                        if (!histogram.ContainsKey(key)) histogram[key] = 0;
                         histogram[key]++;
                     }
                 }
@@ -163,7 +167,8 @@ public class TrackerService
             using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath}");
             conn.Open();
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"SELECT hit_errors FROM plays WHERE created_at_utc >= datetime('now', '-{days} days') AND hit_errors IS NOT NULL ORDER BY created_at_utc DESC LIMIT 2000";
+            string filter = days > 0 ? $"WHERE created_at_utc >= datetime('now', '-{days} days') AND hit_errors IS NOT NULL" : "WHERE hit_errors IS NOT NULL";
+            cmd.CommandText = $"SELECT hit_errors FROM plays {filter} ORDER BY created_at_utc DESC LIMIT 10000";
             using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync()) {
                 try {

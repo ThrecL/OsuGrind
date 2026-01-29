@@ -161,7 +161,32 @@ public class TrackerDb : IDisposable
     }
     public record GoalProgress(int Plays, int Hits, int StarPlays, double TotalPP);
 
-    public async Task<List<DailyStats>> GetHourlyStatsTodayAsync() { using var conn = Open(); using var cmd = conn.CreateCommand(); cmd.CommandText = "SELECT strftime('%H:00', created_at_utc, 'localtime') as h, COUNT(1), SUM(CASE WHEN outcome = 'pass' THEN 1 ELSE 0 END), SUM(pp), SUM(duration_ms), SUM(accuracy), AVG(ur), AVG(key_ratio) FROM plays WHERE score > 0 AND date(created_at_utc, 'localtime') = date('now', 'localtime') GROUP BY h ORDER BY h ASC"; var list = new List<DailyStats>(); using var reader = await cmd.ExecuteReaderAsync(); while (await reader.ReadAsync()) list.Add(new DailyStats { Date = reader.GetString(0), PlayCount = reader.GetInt32(1), PassCount = reader.GetInt32(2), TotalPP = reader.IsDBNull(3) ? 0 : reader.GetDouble(3), TotalDurationMs = reader.IsDBNull(4) ? 0 : reader.GetInt64(4), TotalAccuracy = reader.IsDBNull(5) ? 0 : reader.GetDouble(5), AvgUR = reader.IsDBNull(6) ? 0 : reader.GetDouble(6), AvgKeyRatio = reader.IsDBNull(7) ? 0 : reader.GetDouble(7) }); return list; }
+    public async Task<List<DailyStats>> GetHourlyStatsTodayAsync() 
+    { 
+        using var conn = Open(); 
+        using var cmd = conn.CreateCommand(); 
+        cmd.CommandText = "SELECT strftime('%H:00', created_at_utc, 'localtime') as h, COUNT(1), SUM(CASE WHEN outcome = 'pass' THEN 1 ELSE 0 END), SUM(pp), SUM(duration_ms), SUM(accuracy), AVG(ur), AVG(key_ratio) FROM plays WHERE score > 0 AND date(created_at_utc, 'localtime') = date('now', 'localtime') GROUP BY h ORDER BY h ASC"; 
+        
+        var results = new Dictionary<string, DailyStats>();
+        for (int i = 0; i < 24; i++) results[$"{i:D2}:00"] = new DailyStats { Date = $"{i:D2}:00" };
+
+        using var reader = await cmd.ExecuteReaderAsync(); 
+        while (await reader.ReadAsync()) 
+        {
+            var h = reader.GetString(0);
+            results[h] = new DailyStats { 
+                Date = h, 
+                PlayCount = reader.GetInt32(1), 
+                PassCount = reader.GetInt32(2), 
+                TotalPP = reader.IsDBNull(3) ? 0 : reader.GetDouble(3), 
+                TotalDurationMs = reader.IsDBNull(4) ? 0 : reader.GetInt64(4), 
+                TotalAccuracy = reader.IsDBNull(5) ? 0 : reader.GetDouble(5), 
+                AvgUR = reader.IsDBNull(6) ? 0 : reader.GetDouble(6), 
+                AvgKeyRatio = reader.IsDBNull(7) ? 0 : reader.GetDouble(7) 
+            }; 
+        }
+        return results.Values.OrderBy(v => v.Date).ToList(); 
+    }
 
     public async Task<int> GetPlayStreakAsync()
     {

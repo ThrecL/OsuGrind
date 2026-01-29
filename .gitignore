@@ -25,6 +25,7 @@ metadata.json
 debug_worker.js
 .env
 wrangler.toml
+website/
 
 
 # Logs & Temp

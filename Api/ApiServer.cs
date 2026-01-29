@@ -498,7 +498,7 @@ public class ApiServer : IDisposable
             mentality = baseScore * multiplier * perfPenalty * goalPenalty;
         }
 
-        var dailyPerformance = daily.Select(d => new { date = d.Date, match = Math.Round((d.AvgPP / referencePP) * 100.0, 1) }).ToList();
+        var dailyPerformance = daily.Select(d => new { date = d.Date, match = referencePP > 0 ? Math.Round((d.AvgPP / referencePP) * 100.0, 1) : 0 }).ToList();
 
         return new { 
             totalPlays = summary.TotalPlays, 
@@ -509,7 +509,7 @@ public class ApiServer : IDisposable
             avgKeyRatio = summary.AvgKeyRatio, 
             playsToday, 
             streak, 
-            perfMatch = summary.TotalPlays > 0 ? (summary.AvgPP / referencePP) * 100.0 : 0, 
+            perfMatch = referencePP > 0 ? (summary.AvgPP / referencePP) * 100.0 : 0, 
             currentForm = form, 
             mentality = Math.Clamp(mentality, 0, 100), 
             dailyActivity = daily.Select(d => new { date = d.Date, plays = d.PlayCount, minutes = d.TotalDurationMs / 60000.0, avgPP = d.AvgPP, avgAcc = d.AvgAcc * 100.0, avgUR = d.AvgUR, avgKeyRatio = d.AvgKeyRatio }), 
@@ -523,9 +523,14 @@ public class ApiServer : IDisposable
         using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OsuGrind", "osugrind.sqlite")}");
         conn.Open();
         using var cmd = conn.CreateCommand();
-        string filter = days > 0 ? "WHERE created_at_utc >= datetime('now', $offset) AND hit_errors IS NOT NULL" : "WHERE hit_errors IS NOT NULL";
-        cmd.CommandText = $"SELECT hit_errors FROM plays {filter} ORDER BY created_at_utc DESC LIMIT {(days > 0 ? 100 : 2000)}";
+        string filter = "";
+        if (days == -1) filter = "WHERE date(created_at_utc, 'localtime') = date('now', 'localtime') AND hit_errors IS NOT NULL";
+        else if (days > 0) filter = "WHERE created_at_utc >= datetime('now', $offset) AND hit_errors IS NOT NULL";
+        else filter = "WHERE hit_errors IS NOT NULL";
+
+        cmd.CommandText = $"SELECT hit_errors FROM plays {filter} ORDER BY created_at_utc DESC LIMIT 10000";
         if (days > 0) cmd.Parameters.AddWithValue("$offset", $"-{days} days");
+        
         var errors = new List<double>();
         using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync()) try { var list = JsonSerializer.Deserialize<List<double>>(reader.GetString(0)); if (list != null) errors.AddRange(list); } catch {}
