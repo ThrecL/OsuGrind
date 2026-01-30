@@ -14,8 +14,8 @@ Monitor your performance with ultra-low overhead.
 - **Live Stats**: Real-time PP (Current & FC), Unstable Rate (UR), Star Rating, and Hit Error Histograms.
 - **Tiered Animations**: Visual flair that evolves as you climb the ranks (Rank #1-100).
 
-### 📈 Advanced Skill Modeling (v1.0.1)
-Professional insights powered by sophisticated mathematical models.
+### 📈 Advanced Skill Modeling (v1.0.2)
+- Professional insights powered by sophisticated mathematical models.
 - **Mentality Score**: A "Hard Mode" focus tracker that rewards long sessions and consistent skill over "retry-spamming."
 - **Composite Performance Match**: A unified rating of your PP, Accuracy, and UR compared to your **Top 5 Best Days**.
 - **Tapping Distribution**: Deep analysis of finger dominance and key press intervals.
@@ -41,7 +41,7 @@ OsuGrind is built for performance and reliability:
 
 ## 📥 Installation
 
-1. Download the latest release (v1.0.1) from the [Releases](https://github.com/ThrecL/OsuGrind/releases) page.
+1. Download the latest release (v1.0.2) from the [Releases](https://github.com/ThrecL/OsuGrind/releases) page.
 2. Extract the archive to any folder.
 3. Run `OsuGrind.exe`.
 4. **Settings**: Connect your osu! account via OAuth to enable global profiles and banner synchronization.

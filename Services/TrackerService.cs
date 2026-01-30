@@ -231,7 +231,7 @@ public class TrackerService
             {
                 userId = SettingsManager.Current.UniqueId,
                 token = SettingsManager.Current.AccessToken,
-                version = "1.0.1",
+                version = "1.0.2",
                 stats,
                 graphs
             };

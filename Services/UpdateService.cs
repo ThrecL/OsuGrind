@@ -14,7 +14,7 @@ public class UpdateService
 {
     private const string RepoOwner = "ThrecL";
     private const string RepoName = "OsuGrind";
-    private const string CurrentVersion = "1.0.1"; // MUST MATCH app.js/Settings
+    private const string CurrentVersion = "1.0.2"; // MUST MATCH app.js/Settings
 
     private static readonly HttpClient _client = new HttpClient();
 

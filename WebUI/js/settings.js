@@ -152,7 +152,7 @@ class SettingsModule {
                     await window.api.installUpdate(res.zipUrl);
                 }
             } else {
-                alert('You are up to date! (v1.0.1)');
+                alert('You are up to date! (v1.0.2)');
             }
         } catch (e) {
             alert('Update check failed. See console.');

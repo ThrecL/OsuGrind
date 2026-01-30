@@ -81,7 +81,7 @@ namespace OsuGrind.LiveReading
 
         public void Initialize()
         {
-            if (!Offsets.IsLoaded) Offsets.Load();
+            if (!OffsetLoader.IsLoaded) OffsetLoader.Load();
 
             if (IsConnected) return;
             if ((DateTime.Now - _lastConnectionAttempt).TotalSeconds < 5) return;

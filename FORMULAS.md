@@ -1,9 +1,9 @@
-# OsuGrind Analytics Formulas (v1.0.1)
+# OsuGrind Analytics Formulas (v1.0.2)
 
 This document outlines the mathematical models used by OsuGrind to track your performance, consistency, and mental state.
 
 ## 1. Mentality Score (0–100) - Hard Mode
-The Mentality score is a reactive indicator of your focus and session quality. It is calculated strictly using data from the **last 3 days**. The v1.0.1 "Hard Mode" update prioritizes deep focus and consistency over raw play count.
+The Mentality score is a reactive indicator of your focus and session quality. It is calculated strictly using data from the **last 3 days**. The v1.0.2 "Hard Mode" update prioritizes deep focus and consistency over raw play count.
 
 ### Base Score
 The base score is weighted as follows:

@@ -8,7 +8,7 @@ using OsuGrind.Services;
 
 namespace OsuGrind.LiveReading;
 
-public static class Offsets
+public static class OffsetLoader
 {
     private static Dictionary<string, Dictionary<string, int>> _offsets = new();
     private static Dictionary<string, Dictionary<string, string>> _stringOffsets = new();
@@ -48,7 +48,7 @@ public static class Offsets
                         else
                         {
                             ParseOffsets(json);
-                            DebugService.Log($"Loaded offsets (Version: {_version})", "Offsets");
+                            DebugService.Log($"Loaded offsets (Version: {_version})", "OffsetLoader");
                         }
                         return;
                     }
@@ -56,7 +56,7 @@ public static class Offsets
                 _offsetsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "LiveReading", "offsets.json");
                 Task.Run(async () => await FetchFromTosuAsync()).Wait(10000);
             }
-            catch (Exception ex) { DebugService.Log($"Error loading offsets: {ex.Message}", "Offsets"); }
+            catch (Exception ex) { DebugService.Log($"Error loading offsets: {ex.Message}", "OffsetLoader"); }
         }
     }
 
