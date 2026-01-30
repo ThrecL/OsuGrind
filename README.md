@@ -49,9 +49,8 @@ OsuGrind is built for performance and reliability:
 ## 🧪 Analytics Formulas
 For a detailed mathematical breakdown of our scoring systems, visit the [Formulas Documentation](FORMULAS.md).
 
-## 💖 Support
-OsuGrind is developed with passion by **3cL**. If you'd like to support the project:
-[**Support on Ko-fi**](https://ko-fi.com/nagakiba)
+## 🤖 AI Disclaimer
+This project was substantially generated and maintained using **opencode** (AI agent). We believe in full transparency: if you do not support the use of AI in software development, please do not use or contribute to this software.
 
 ## 📜 Credits
 OsuGrind stands on the shoulders of these incredible projects:
