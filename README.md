@@ -4,8 +4,6 @@
 
 OsuGrind is a high-performance analytics companion and habit-building ecosystem for [osu!](https://osu.ppy.sh/). It combines real-time memory reading, advanced skill modeling, and global community integration to help players master their consistency.
 
-Visit the official website and community leaderboard at **[osugrind.app](https://osugrind.app)**.
-
 ## 🛠 Key Features
 
 ### 📡 Unified Real-Time Tracking
